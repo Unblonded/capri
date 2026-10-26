@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Todoist+</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%23ff5a4a'/><path d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+</head>
+<body>
+  <!-- Ambient background the glass refracts -->
+  <div class="backdrop" aria-hidden="true">
+    <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span><span class="blob b4"></span>
+  </div>
+
+  <!-- Connect screen -->
+  <div id="connect" class="connect hidden">
+    <div class="connect-card glass">
+      <div class="brand big"><span class="logo"><i data-ic="check"></i></span> Todoist<span class="plus">+</span></div>
+      <p class="muted">Connect your Todoist account to get started.</p>
+      <a id="oauth-btn" class="btn primary wide hidden" href="/auth/login">Sign in with Todoist</a>
+      <div id="oauth-or" class="divider hidden"><span>or paste your API token</span></div>
+      <form id="token-form">
+        <input id="token-input" type="password" placeholder="Todoist API token" autocomplete="off" />
+        <button class="btn primary wide" type="submit">Connect</button>
+      </form>
+      <p class="hint">Find it in Todoist → Settings → Integrations → Developer. The token stays on this machine.</p>
+      <p id="connect-error" class="error"></p>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="app hidden">
+    <aside id="sidebar" class="sidebar glass">
+      <div class="sidebar-head">
+        <div class="brand"><span class="logo"><i data-ic="check"></i></span> Todoist<span class="plus">+</span></div>
+        <div style="display:flex;gap:2px">
+          <button class="icon-btn" id="help-btn" title="Keyboard shortcuts (?)"><i data-ic="keyboard"></i></button>
+          <button class="icon-btn" id="theme-btn" title="Toggle theme"><i data-ic="theme"></i></button>
+        </div>
+      </div>
+      <button class="add-task-btn" id="sidebar-add"><span class="plus-badge"><i data-ic="plus"></i></span> Add task <kbd>Q</kbd></button>
+      <button class="search-btn" id="sidebar-search"><i data-ic="search"></i> Search &amp; commands <kbd>⌘K</kbd></button>
+      <nav id="nav-main" class="nav"></nav>
+      <div class="nav-group">
+        <div class="nav-title"><span>Projects</span><button class="icon-btn sm" id="add-project" title="New project"><i data-ic="plus"></i></button></div>
+        <nav id="nav-projects" class="nav"></nav>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title"><span>Labels</span></div>
+        <nav id="nav-labels" class="nav"></nav>
+      </div>
+
+      <div class="timer glass-inset" id="timer">
+        <div class="timer-top">
+          <span class="timer-mode" id="timer-mode">Focus</span>
+          <span class="timer-time" id="timer-time">25:00</span>
+        </div>
+        <div class="timer-task muted small" id="timer-task">No task linked</div>
+        <div class="timer-btns">
+          <button class="btn sm" id="timer-toggle">Start</button>
+          <button class="btn sm ghost" id="timer-reset">Reset</button>
+          <button class="btn sm ghost" id="timer-switch" title="Switch focus / break"><i data-ic="swap"></i></button>
+        </div>
+      </div>
+
+      <div class="sidebar-foot">
+        <button class="link-btn" id="refresh-btn"><i data-ic="sync"></i> Sync</button>
+        <button class="link-btn" id="disconnect-btn">Disconnect</button>
+      </div>
+    </aside>
+
+    <main class="main glass">
+      <header class="main-head">
+        <button class="icon-btn menu-btn" id="menu-btn" title="Menu"><i data-ic="menu"></i></button>
+        <div id="ring" class="ring hidden"></div>
+        <div class="title-wrap">
+          <h1 id="view-title">Today</h1>
+          <div id="view-sub" class="muted"></div>
+        </div>
+        <div class="head-actions" id="head-actions"></div>
+      </header>
+      <div id="view" class="view"></div>
+    </main>
+
+    <aside id="detail" class="detail glass hidden"></aside>
+  </div>
+
+  <!-- Bulk action bar -->
+  <div id="bulk" class="bulk glass hidden">
+    <span id="bulk-count"></span>
+    <button class="btn sm" data-bulk="complete"><i data-ic="check"></i> Complete</button>
+    <button class="btn sm" data-bulk="today"><i data-ic="sun"></i> Today</button>
+    <button class="btn sm" data-bulk="tomorrow"><i data-ic="arrow"></i> Tomorrow</button>
+    <button class="btn sm" data-bulk="next week"><i data-ic="nextweek"></i> Next week</button>
+    <select class="btn sm" id="bulk-prio"><option value="">Priority…</option><option value="4">P1</option><option value="3">P2</option><option value="2">P3</option><option value="1">P4</option></select>
+    <button class="btn sm ghost" data-bulk="clear"><i data-ic="close"></i></button>
+  </div>
+
+  <!-- Quick add modal -->
+  <div id="quick" class="modal hidden">
+    <div class="modal-card glass quick-card">
+      <input id="quick-input" placeholder="e.g. Review deck tomorrow 4pm #Work @focus p1 {friday}" autocomplete="off" />
+      <textarea id="quick-desc" placeholder="Description" rows="2"></textarea>
+      <div class="quick-dates">
+        <label class="date-pill" title="When you plan to do it"><span><i data-ic="calendar"></i> Do date</span><input type="date" id="quick-due" /></label>
+        <label class="date-pill deadline" title="When it absolutely has to be done"><span><i data-ic="flag"></i> Deadline</span><input type="date" id="quick-deadline" /></label>
+      </div>
+      <div id="quick-preview" class="quick-preview"></div>
+      <div class="quick-foot">
+        <span class="muted small">Type dates, <b>#project</b>, <b>@label</b>, <b>p1–p4</b>, <b>{deadline}</b></span>
+        <div>
+          <button class="btn ghost" id="quick-cancel">Cancel</button>
+          <button class="btn primary" id="quick-save">Add task</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Command palette -->
+  <div id="palette" class="modal hidden">
+    <div class="modal-card glass palette-card">
+      <input id="palette-input" placeholder="Search tasks, jump to a project, or run a command…" autocomplete="off" />
+      <div id="palette-results" class="palette-results"></div>
+    </div>
+  </div>
+
+  <!-- Drawing pad -->
+  <div id="draw" class="modal draw-modal hidden">
+    <div class="modal-card glass draw-card">
+      <div class="draw-head">
+        <input id="draw-title" placeholder="Untitled sketch" />
+        <select id="draw-task" class="btn sm" title="Attach to a task"></select>
+        <button class="btn ghost sm danger hidden" id="draw-delete">Delete</button>
+        <button class="btn ghost sm" id="draw-cancel">Cancel</button>
+        <button class="btn primary sm" id="draw-save">Save</button>
+      </div>
+      <div class="draw-tools">
+        <div class="seg" id="draw-tool">
+          <button data-tool="pen" class="on" title="Pen (P)"><i data-ic="pencil"></i> Pen</button>
+          <button data-tool="marker" title="Highlighter (H)"><i data-ic="marker"></i> Marker</button>
+          <button data-tool="eraser" title="Eraser (E)"><i data-ic="eraser"></i> Eraser</button>
+        </div>
+        <div class="swatches" id="draw-colors"></div>
+        <input type="range" id="draw-size" min="1" max="40" value="4" title="Brush size" />
+        <div class="spacer"></div>
+        <button class="icon-btn" id="draw-undo" title="Undo (⌘Z)"><i data-ic="undo"></i></button>
+        <button class="icon-btn" id="draw-redo" title="Redo (⇧⌘Z)"><i data-ic="redo"></i></button>
+        <button class="icon-btn" id="draw-clear" title="Clear"><i data-ic="trash"></i></button>
+      </div>
+      <div class="canvas-wrap"><canvas id="draw-canvas"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Shortcut help -->
+  <div id="help" class="modal hidden">
+    <div class="modal-card glass help-card">
+      <h3>Keyboard shortcuts</h3>
+      <div class="help-grid">
+        <kbd>Q</kbd><span>Add task</span>
+        <kbd>⌘K</kbd><span>Search &amp; commands</span>
+        <kbd>J / K</kbd><span>Move selection</span>
+        <kbd>Enter</kbd><span>Open task</span>
+        <kbd>E</kbd><span>Complete</span>
+        <kbd>X  or  ⇧ / ⌘ click</kbd><span>Multi-select (bulk actions)</span>
+        <kbd>1–4</kbd><span>Priority</span>
+        <kbd>T / M / W</kbd><span>Do today / tomorrow / next week</span>
+        <kbd>D</kbd><span>Set deadline</span>
+        <kbd>S</kbd><span>Sketch for task</span>
+        <kbd>F</kbd><span>Focus timer on task</span>
+        <kbd>#</kbd><span>Delete</span>
+        <kbd>G then T U F L D S C I</kbd><span>Today, Upcoming, Focus, Deadlines, Dashboard, Sketches, Completed, Inbox</span>
+        <kbd>?</kbd><span>This help</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
