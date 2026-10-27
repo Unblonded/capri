@@ -959,13 +959,11 @@ html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -we
   position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; opacity: 0;
   border-radius: 12px; background: var(--active); border: 1px solid var(--glass-border);
   box-shadow: 0 4px 14px var(--glass-shade), inset 0 1px 0 var(--glass-edge);
-  /* Glides with only a hint of settle, rather than a full spring. */
-  transition: transform .42s cubic-bezier(.25, 1.1, .4, 1), width .3s var(--ease-out), height .3s var(--ease-out), opacity .2s;
+  /* A short, plain glide: no overshoot, no stretch. */
+  transition: transform .26s cubic-bezier(.2, .8, .2, 1), width .26s cubic-bezier(.2, .8, .2, 1), height .26s cubic-bezier(.2, .8, .2, 1), opacity .15s;
   will-change: transform;
 }
 .nav-pill.instant { transition: none; }
-.nav-pill.jump { animation: pill-stretch .42s var(--ease-out); }
-@keyframes pill-stretch { 35% { scale: .98 1.12; } }
 .sidebar.has-pill .nav-item.active { background: transparent; border-color: transparent; box-shadow: none; }
 
 /* ---- theme switching ---- */

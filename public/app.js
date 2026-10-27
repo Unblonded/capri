@@ -663,11 +663,6 @@ function moveNavPill() {
   pill.style.transform = `translate(${left}px, ${top}px)`;
   pill.style.opacity = '1';
   sidebar.classList.add('has-pill');
-  if (!first && Math.abs(top - navPillAt.top) > 4) {
-    pill.classList.remove('jump');
-    void pill.offsetWidth; // restart the stretch
-    pill.classList.add('jump');
-  }
   navPillAt = { top, left, w: r.width, h: r.height };
 }
 addEventListener('resize', () => moveNavPill());
