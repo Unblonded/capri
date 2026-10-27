@@ -3,6 +3,7 @@ const { app, BrowserWindow, Tray, Menu, Notification, globalShortcut, ipcMain, n
 const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const path = require('node:path');
+const desktopPin = require('./pin.cjs');
 
 const QUICK_ADD_SHORTCUT = 'CommandOrControl+Shift+Space';
 const DEFAULT_SERVER = 'https://capri.kalculator.lol';
@@ -14,6 +15,7 @@ let win = null;
 let tray = null;
 let quitting = false;
 let updateReady = null; // version number once an update has downloaded
+let raised = false; // pinned to the desktop, but brought up for now (tray, quick add) until it loses focus
 let config = loadConfig();
 if (!config.serverUrl) config.serverUrl = DEFAULT_SERVER;
 
@@ -83,7 +85,9 @@ function createWindow() {
   });
   win.setMenuBarVisibility(false);
 
-  if (!process.argv.includes('--hidden')) win.once('ready-to-show', () => win.show());
+  // Pinned to the desktop it shows at startup too, like a widget.
+  if (!process.argv.includes('--hidden') || config.pinned) win.once('ready-to-show', () => win.show());
+  if (config.pinned) win.once('show', () => setPinned(true));
 
   // Leave room for the window buttons and make the top strip draggable.
   win.webContents.on('did-finish-load', () => {
@@ -116,6 +120,12 @@ function createWindow() {
     if (ctrl && input.shift && input.key.toLowerCase() === 'i') win.webContents.toggleDevTools();
   });
 
+  // Pinned: clicking it keeps it on the desktop layer instead of jumping above other windows,
+  // and "show desktop" (Win+D) doesn't minimise it away.
+  win.on('focus', () => { if (config.pinned && !raised) desktopPin.sendToBack(win); });
+  win.on('blur', () => { if (raised) { raised = false; if (config.pinned) desktopPin.sendToBack(win); } });
+  win.on('minimize', () => { if (config.pinned) win.restore(); });
+
   // Closing hides to the tray so Capri stays running.
   win.on('close', (e) => {
     if (quitting) return;
@@ -135,6 +145,7 @@ function createWindow() {
 }
 
 function showWindow() {
+  if (config.pinned) raised = true;
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
@@ -146,6 +157,18 @@ function quickAdd() {
   win.webContents.executeJavaScript(`document.querySelector('#sidebar-add')?.click()`).catch(() => {});
 }
 
+function setPinned(on) {
+  if (on && !desktopPin.pin(win)) {
+    new Notification({ title: 'Capri', body: 'Couldn’t pin Capri to the desktop on this PC.' }).show();
+    on = false;
+  }
+  if (!on) desktopPin.unpin(win);
+  win.setSkipTaskbar(on);
+  if (on) win.setAlwaysOnTop(false);
+  else win.setAlwaysOnTop(Boolean(config.alwaysOnTop));
+  saveConfig({ pinned: on });
+}
+
 function buildTrayMenu() {
   const login = app.getLoginItemSettings();
   return Menu.buildFromTemplate([
@@ -153,7 +176,12 @@ function buildTrayMenu() {
     { label: 'Quick add task', accelerator: QUICK_ADD_SHORTCUT, click: quickAdd },
     { type: 'separator' },
     {
-      label: 'Always on top', type: 'checkbox', checked: Boolean(config.alwaysOnTop),
+      label: 'Pin to desktop', type: 'checkbox', checked: Boolean(config.pinned),
+      visible: process.platform === 'win32', enabled: desktopPin.available(),
+      click: (item) => setPinned(item.checked),
+    },
+    {
+      label: 'Always on top', type: 'checkbox', checked: Boolean(config.alwaysOnTop), enabled: !config.pinned,
       click: (item) => { win.setAlwaysOnTop(item.checked); saveConfig({ alwaysOnTop: item.checked }); },
     },
     {

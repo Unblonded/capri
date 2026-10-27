@@ -59,6 +59,7 @@ On a **Windows** server the update also rebuilds the desktop app whenever its ve
 - Lives in the system tray; closing the window keeps it running
 - Starts with Windows (hidden in the tray). Toggle from the tray menu
 - **Ctrl+Shift+Space** from anywhere opens quick add
+- *Pin to desktop* (tray menu, off by default): Capri sits on the desktop layer like a widget, just above your wallpaper and under your other windows, so you can add and tick off tasks right on the desktop. It leaves the taskbar while pinned and stays visible after Win+D
 - *Always on top* toggle in the tray menu, and it remembers its window size and position
 - Updates itself from your Capri server (installer version only; the portable exe can't self-update). Tray → *Check for updates* checks now
 
@@ -82,6 +83,7 @@ No App Store or developer account needed. Open your Capri address (e.g. https://
 - **Projects:** list or board layout per project, sections, drag cards between board columns, nested sub-projects and sub-tasks
 - **Quick add** with natural language and live inline highlighting. Dates are detected as you type, shorthand included: `tod`, `tmr`/`tmrw`, `fri`, `wed 3pm`, `next mon`, `nov 12`, `11/2`, `in 2 weeks`, `tonight`, `at noon`. The date is pulled out of the title and set as the do date; hit × on the date chip if a word wasn't meant as a date. `every …` repeats are passed to Todoist untouched
 - **Task drawer:** edit name, description, due (natural language), project/section, priority, labels, sub-tasks, comments, delete
+- **On phones:** swipe a task right to complete it, left to delete it (with a few seconds to undo); no accidental zooming when tapping fields
 - **Command palette** (⌘K) for tasks, projects, labels and commands
 - **Dashboard:** overdue/today/week counts, completed-per-day chart, open tasks by project
 - Undo on complete, mobile layout, auto-sync when you come back to the tab

@@ -1,7 +1,7 @@
 {
   "name": "capri",
-  "version": "0.3.0",
-  "description": "Capri \u2014 a liquid-glass Todoist client running on Express",
+  "version": "0.4.0",
+  "description": "Capri — a liquid-glass Todoist client running on Express",
   "main": "desktop/main.cjs",
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "dev": "node --watch server.js",
     "desktop": "electron .",
     "icons": "electron desktop/make-icons.cjs",
+    "predist:win": "node scripts/fetch-win-natives.mjs",
     "dist:win": "electron-builder --win nsis portable --x64",
     "update": "node scripts/update.mjs",
     "serve": "node --watch server.js",
@@ -20,7 +21,8 @@
   "dependencies": {
     "dotenv": "^16.4.5",
     "electron-updater": "^6.3.9",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "koffi": "3.3.2"
   },
   "devDependencies": {
     "electron": "^33.2.1",
