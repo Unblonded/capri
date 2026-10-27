@@ -33,8 +33,8 @@ const ICONS = {
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   done: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
-  // Capri logo: the sun setting over two waves.
-  capri: '<circle cx="12" cy="9" r="4.2" fill="currentColor" stroke="none"/><path d="M2.5 15.5c2.4-1.8 4.8-1.8 7.2 0s4.8 1.8 7.2 0 3.6-1.4 4.6-.6"/><path d="M2.5 20c2.4-1.8 4.8-1.8 7.2 0s4.8 1.8 7.2 0 3.6-1.4 4.6-.6" opacity=".6"/>',
+  // Capri logo: a hand-drawn ♑ (Capricorn) glyph.
+  capri: '<path d="M3.6 8.2c1.3-1.3 3.3-.6 3.3 1.6V17.5"/><path d="M6.9 10.6c0-2.9 1.7-4.6 3.8-4.6 2.2 0 3.6 1.6 3.6 4.1v5.4"/><path d="M14.3 15.5a2.75 2.75 0 1 0 2.75-2.75c-1.6 0-2.75 1.3-2.75 2.9 0 2.9-2 4.9-4.7 5.4"/>',
   warn: '<path d="M10.3 4.3a2 2 0 0 1 3.4 0l7.5 13a2 2 0 0 1-1.7 3H4.5a2 2 0 0 1-1.7-3z"/><path d="M12 9.5v4M12 17h.01"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
@@ -99,6 +99,11 @@ async function api(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
+  // The server wants its password again (e.g. the cookie expired): reloading shows the login page.
+  if (res.status === 401 && data.needPassword) {
+    location.reload();
+    throw new Error('Password required');
+  }
   if (res.status === 401 && url !== '/api/connect') {
     showConnect();
     throw new Error(data.error || 'Not connected');
@@ -1161,6 +1166,7 @@ function renderPalette() {
     { label: 'Keyboard shortcuts', run: () => $('#help').classList.remove('hidden') },
     { label: 'Sync now', run: () => sync() },
     { label: 'New project', run: createProject },
+    ...(state.passwordProtected ? [{ label: 'Lock Capri (sign out of this server)', run: () => api('POST', '/api/logout').then(() => location.reload()) }] : []),
   ].filter((c) => match(c.label)).map((c) => ({ ...c, kind: 'Command', group: 'Commands' }));
   const projects = [inbox(), ...orderedProjects()].filter(Boolean).filter((p) => match(projectName(p))).map((p) => ({
     label: projectName(p), dot: color(p.color), kind: 'Project', group: 'Projects',
@@ -1552,6 +1558,7 @@ async function boot() {
   applyTheme(store.get('theme', matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   state.sort = store.get('sort', 'smart');
   const status = await api('GET', '/api/status');
+  state.passwordProtected = status.passwordProtected;
   $('#oauth-btn').classList.toggle('hidden', !status.oauthAvailable);
   $('#oauth-or').classList.toggle('hidden', !status.oauthAvailable);
   if (!status.connected) return showConnect();

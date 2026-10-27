@@ -1,12 +1,15 @@
 {
   "name": "capri",
   "version": "0.1.0",
-  "description": "Capri — a liquid-glass Todoist client running on Express",
-  "main": "server.js",
+  "description": "Capri \u2014 a liquid-glass Todoist client running on Express",
+  "main": "desktop/main.cjs",
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "desktop": "electron .",
+    "icons": "electron desktop/make-icons.cjs",
+    "dist:win": "electron-builder --win nsis portable --x64"
   },
   "engines": {
     "node": ">=18"
@@ -14,5 +17,42 @@
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^4.21.2"
-  }
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.unblonded.capri",
+    "productName": "Capri",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "desktop/**",
+      "!desktop/make-icons.cjs",
+      "package.json"
+    ],
+    "win": {
+      "icon": "desktop/icons/icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Capri",
+      "artifactName": "Capri-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Capri-Portable-${version}.${ext}"
+    },
+    "mac": {
+      "icon": "desktop/icons/icon.png"
+    }
+  },
+  "author": "Unblonded"
 }

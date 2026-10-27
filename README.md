@@ -1,6 +1,6 @@
-# Capri
+# Capri ♑
 
-Todoist, on island time. A nicer, more advanced Todoist client that runs locally on Express + Node.js and syncs with your real Todoist account.
+Steady climb, one task at a time. Named for Capricorn: midnight-sky glass, gold accents, and a hand-drawn ♑ mark. A nicer, more advanced Todoist client that runs locally on Express + Node.js and syncs with your real Todoist account.
 
 ## Run it
 
@@ -15,6 +15,34 @@ Open http://localhost:3000 and connect your account:
 - **Sign in with Todoist (OAuth):** create an app at https://developer.todoist.com/appconsole.html, set the redirect URL to `http://localhost:3000/auth/callback`, and put `TODOIST_CLIENT_ID` / `TODOIST_CLIENT_SECRET` in `.env` (copy `.env.example`).
 
 The token never reaches the browser — the Express server proxies every call to the Todoist API v1.
+
+## Hosting it on a domain (e.g. https://capri.kalculator.lol)
+
+Run the server on the computer that stays on, and put your domain in front of it with any HTTPS reverse proxy or tunnel (Caddy, nginx, Cloudflare Tunnel…) pointing at `http://localhost:3000`.
+
+1. Copy `.env.example` to `.env` and **set `CAPRI_PASSWORD`**. Without it, anyone who finds the URL can use your Todoist.
+2. `npm install && npm start`
+3. Open the domain, enter the password once (it's remembered for a year), and connect your Todoist.
+
+Wrong passwords are rate-limited (10 per 15 minutes per IP), and the login cookie is marked `Secure` when served over HTTPS. If your proxy isn't on the same machine or private network, set `TRUST_PROXY` to its address so client IPs and HTTPS are detected correctly.
+
+## Windows desktop app
+
+`desktop/` is a small Electron shell that opens your Capri server as a desktop app:
+
+- Opens **https://capri.kalculator.lol** by default (change it from the tray icon → *Change server…*)
+- Lives in the system tray; closing the window keeps it running
+- Starts with Windows (hidden in the tray). Toggle from the tray menu
+- **Ctrl+Shift+Space** from anywhere opens quick add
+- *Always on top* toggle in the tray menu, and it remembers its window size and position
+
+Build it on any machine with `npm install` then:
+
+```bash
+npm run dist:win
+```
+
+This produces `dist/Capri-Setup-<version>.exe` (installer) and `dist/Capri-Portable-<version>.exe` (no install). The builds aren't code-signed, so Windows SmartScreen will warn the first time: click *More info → Run anyway*. Run `npm run desktop` to try the app locally, or `npm run icons` after changing the logo.
 
 ## Features
 

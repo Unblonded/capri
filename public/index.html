@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/styles.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%23ff5a4a'/><stop offset='1' stop-color='%23ff8a3d'/></linearGradient></defs><rect width='32' height='32' rx='9' fill='url(%23g)'/><circle cx='16' cy='12.5' r='4.6' fill='white'/><path d='M5.5 20c3-2.2 6-2.2 9 0s6 2.2 9 0 3.5-1.6 3.5-1.6' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round'/><path d='M5.5 25c3-2.2 6-2.2 9 0s6 2.2 9 0' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round' opacity='.6'/></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='n' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%231f2a52'/><stop offset='1' stop-color='%230a0f22'/></linearGradient></defs><rect width='32' height='32' rx='9' fill='url(%23n)'/><g transform='translate(4.6 4.2) scale(0.95)' fill='none' stroke='%23e9c46a' stroke-width='2.3' stroke-linecap='round' stroke-linejoin='round'><path d='M3.6 8.2c1.3-1.3 3.3-.6 3.3 1.6V17.5'/><path d='M6.9 10.6c0-2.9 1.7-4.6 3.8-4.6 2.2 0 3.6 1.6 3.6 4.1v5.4'/><path d='M14.3 15.5a2.75 2.75 0 1 0 2.75-2.75c-1.6 0-2.75 1.3-2.75 2.9 0 2.9-2 4.9-4.7 5.4'/></g></svg>" />
 </head>
 <body>
   <!-- Ambient background the glass refracts -->
@@ -19,14 +19,14 @@
   <div id="connect" class="connect hidden">
     <div class="connect-card glass">
       <div class="brand big"><span class="logo"><i data-ic="capri"></i></span><span class="wordmark">Capri</span></div>
-      <p class="muted">Todoist, on island time. Connect your account to get started.</p>
+      <p class="muted">Steady climb, one task at a time. Connect your Todoist to begin.</p>
       <a id="oauth-btn" class="btn primary wide hidden" href="/auth/login">Sign in with Todoist</a>
       <div id="oauth-or" class="divider hidden"><span>or paste your API token</span></div>
       <form id="token-form">
         <input id="token-input" type="password" placeholder="Todoist API token" autocomplete="off" />
         <button class="btn primary wide" type="submit">Connect</button>
       </form>
-      <p class="hint">Find it in Todoist → Settings → Integrations → Developer. The token stays on this machine.</p>
+      <p class="hint">Find it in Todoist → Settings → Integrations → Developer. It’s stored only on your Capri server.</p>
       <p id="connect-error" class="error"></p>
     </div>
   </div>

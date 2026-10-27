@@ -2,13 +2,17 @@ import 'dotenv/config';
 import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+// 0.0.0.0 lets other computers (like the Capri desktop app) reach this server; set HOST=127.0.0.1 to keep it local.
+const HOST = process.env.HOST || '0.0.0.0';
+const PASSWORD = process.env.CAPRI_PASSWORD || '';
 const TODOIST_API = 'https://api.todoist.com/api/v1';
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.CAPRI_DATA_DIR || path.join(__dirname, 'data');
 const TOKEN_FILE = path.join(DATA_DIR, 'token.json');
 
 // ---- token storage (single-user, local app) ----
@@ -78,8 +82,56 @@ async function tdAll(pathname, query = {}, key = 'results') {
 // ---- app ----
 
 const app = express();
+// Behind a reverse proxy / tunnel (Caddy, nginx, Cloudflare), trust it to report the real client IP and https.
+app.set('trust proxy', process.env.TRUST_PROXY ?? 'loopback, linklocal, uniquelocal');
 // Drawings carry big image payloads and get their own body limit below.
 app.use((req, res, next) => (req.path === '/api/drawings' ? next() : express.json()(req, res, next)));
+
+// ---- optional password (strongly recommended when the server is reachable from the network) ----
+
+const AUTH_COOKIE = 'capri_auth';
+const authValue = PASSWORD && crypto.createHmac('sha256', PASSWORD).update('capri-session').digest('hex');
+const hasAuthCookie = (req) => (req.headers.cookie || '').split(/;\s*/).includes(`${AUTH_COOKIE}=${authValue}`);
+const OPEN_PATHS = new Set(['/login.html', '/styles.css', '/api/login']);
+// At most 10 wrong passwords per IP every 15 minutes.
+const failedLogins = new Map();
+const LOGIN_WINDOW = 15 * 60 * 1000;
+function tooManyAttempts(ip) {
+  const now = Date.now();
+  const recent = (failedLogins.get(ip) || []).filter((t) => now - t < LOGIN_WINDOW);
+  failedLogins.set(ip, recent);
+  return recent.length >= 10;
+}
+
+app.use((req, res, next) => {
+  if (!PASSWORD || hasAuthCookie(req) || OPEN_PATHS.has(req.path)) return next();
+  if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) {
+    return res.status(401).json({ error: 'Password required', needPassword: true });
+  }
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.post('/api/login', async (req, res) => {
+  if (tooManyAttempts(req.ip)) return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+  const given = Buffer.from(String(req.body?.password || ''));
+  const expected = Buffer.from(PASSWORD);
+  const ok = PASSWORD && given.length === expected.length && crypto.timingSafeEqual(given, expected);
+  if (!ok) {
+    failedLogins.get(req.ip).push(Date.now());
+    await new Promise((r) => setTimeout(r, 600)); // slow down guessing
+    return res.status(401).json({ error: 'Wrong password' });
+  }
+  failedLogins.delete(req.ip);
+  // Over https (your domain) the cookie is never sent unencrypted.
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${authValue}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${req.secure ? '; Secure' : ''}`);
+  res.json({ ok: true });
+});
+
+app.post('/api/logout', (req, res) => {
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  res.json({ ok: true });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 const wrap = (fn) => (req, res) =>
@@ -103,6 +155,7 @@ app.get('/api/status', (req, res) => {
     connected: Boolean(token),
     fromEnv: Boolean(process.env.TODOIST_TOKEN),
     oauthAvailable: Boolean(process.env.TODOIST_CLIENT_ID && process.env.TODOIST_CLIENT_SECRET),
+    passwordProtected: Boolean(PASSWORD),
   });
 });
 
@@ -284,7 +337,13 @@ app.delete('/api/drawings/:id', (req, res) => {
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log(`Capri running at http://localhost:${PORT}`);
+  if (HOST === '0.0.0.0') {
+    const lan = Object.values(os.networkInterfaces()).flat()
+      .filter((n) => n && n.family === 'IPv4' && !n.internal).map((n) => `http://${n.address}:${PORT}`);
+    if (lan.length) console.log(`Other computers can use: ${lan.join('  ')}`);
+    if (!PASSWORD) console.log('WARNING: no CAPRI_PASSWORD set. Anyone who can reach this server (your network, or the internet if it is on a domain) can use your Todoist. Set CAPRI_PASSWORD in .env.');
+  }
   if (!token) console.log('Not connected yet — open the app and paste your Todoist API token.');
 });

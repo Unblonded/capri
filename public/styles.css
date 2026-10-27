@@ -1,21 +1,23 @@
-/* ============ Liquid glass theme ============ */
+/* ============ Liquid glass theme · Capricorn: midnight sky, stone and gold ============ */
 :root {
-  --bg: #eef0f7;
+  --bg: #ece8df;
   --glass: rgba(255, 255, 255, 0.42);
   --glass-strong: rgba(255, 255, 255, 0.66);
   --glass-inset: rgba(255, 255, 255, 0.35);
   --glass-border: rgba(255, 255, 255, 0.7);
   --glass-edge: rgba(255, 255, 255, 0.95);
-  --glass-shade: rgba(20, 30, 70, 0.08);
+  --glass-shade: rgba(30, 30, 50, 0.08);
   --hover: rgba(255, 255, 255, 0.5);
   --active: rgba(255, 255, 255, 0.78);
-  --line: rgba(30, 40, 80, 0.08);
-  --text: #15172a;
-  --muted: #5d6178;
-  --faint: #9a9db2;
-  --accent: #ff5a4a;
-  --accent-2: #ff8a3d;
-  --accent-soft: rgba(255, 90, 74, 0.14);
+  --line: rgba(30, 32, 50, 0.09);
+  --text: #161a2b;
+  --muted: #5f6070;
+  --faint: #a29f98;
+  --accent: #a87414;
+  --accent-2: #d7a443;
+  --accent-soft: rgba(184, 132, 30, 0.15);
+  --on-accent: #1c1606;
+  --night: linear-gradient(135deg, #1f2a52, #0a0f22);
   --p1: #e5383b;
   --p2: #f08a00;
   --p3: #2f6bff;
@@ -25,14 +27,14 @@
   --shadow: 0 20px 60px rgba(30, 40, 90, 0.18), 0 2px 10px rgba(30, 40, 90, 0.06);
   --blur: blur(28px) saturate(180%);
   --radius: 22px;
-  --b1: #ff9a8b; --b2: #8ec5ff; --b3: #c7a6ff; --b4: #ffd38a;
+  --b1: #b7cdb0; --b2: #a8bcd8; --b3: #cfc6e2; --b4: #ecd29c;
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --bg: #0b0d18;
-  --glass: rgba(30, 33, 52, 0.45);
-  --glass-strong: rgba(36, 40, 62, 0.75);
+  --bg: #060914;
+  --glass: rgba(22, 28, 52, 0.45);
+  --glass-strong: rgba(26, 32, 60, 0.78);
   --glass-inset: rgba(255, 255, 255, 0.05);
   --glass-border: rgba(255, 255, 255, 0.12);
   --glass-edge: rgba(255, 255, 255, 0.28);
@@ -40,12 +42,12 @@
   --hover: rgba(255, 255, 255, 0.07);
   --active: rgba(255, 255, 255, 0.13);
   --line: rgba(255, 255, 255, 0.07);
-  --text: #eef0fa;
-  --muted: #a3a7c0;
-  --faint: #6b6f88;
-  --accent: #ff6b5c;
-  --accent-2: #ff9a52;
-  --accent-soft: rgba(255, 107, 92, 0.18);
+  --text: #eef0f8;
+  --muted: #a2a8c2;
+  --faint: #646a88;
+  --accent: #e6b85c;
+  --accent-2: #f6dc96;
+  --accent-soft: rgba(230, 184, 92, 0.17);
   --p1: #ff6b6b;
   --p2: #ffa632;
   --p3: #6b9bff;
@@ -53,7 +55,7 @@
   --green: #3ddc84;
   --deadline: #c784ff;
   --shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 0, 0, 0.3);
-  --b1: #7a2cff; --b2: #0066ff; --b3: #ff3d7f; --b4: #00b3a4;
+  --b1: #22337a; --b2: #0f5363; --b3: #46246b; --b4: #6e5420;
   color-scheme: dark;
 }
 
@@ -145,7 +147,7 @@ kbd {
 .btn:active { transform: scale(0.97); }
 .btn.sm { padding: 5px 12px; font-size: 12.5px; }
 .btn.primary {
-  background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--on-accent); border-color: transparent;
   box-shadow: 0 6px 18px var(--accent-soft), inset 0 1px 0 rgba(255,255,255,.4);
 }
 .btn.primary:hover { filter: brightness(1.06); }
@@ -175,8 +177,8 @@ select.btn { appearance: none; padding-right: 14px; cursor: pointer; }
 .brand { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 9px; letter-spacing: -0.01em; }
 .brand.big { font-size: 26px; justify-content: center; margin-bottom: 6px; }
 .brand .logo {
-  width: 26px; height: 26px; border-radius: 9px; color: #fff; display: grid; place-items: center; font-size: 14px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 4px 12px var(--accent-soft), inset 0 1px 0 rgba(255,255,255,.45);
+  width: 26px; height: 26px; border-radius: 9px; color: #f0cd7c; display: grid; place-items: center; font-size: 14px;
+  background: var(--night); box-shadow: 0 4px 14px rgba(10, 15, 34, .35), inset 0 1px 0 rgba(246, 220, 150, .25), inset 0 0 0 1px rgba(233, 196, 106, .18);
 }
 .brand.big .logo { width: 40px; height: 40px; font-size: 21px; border-radius: 13px; }
 .wordmark {
@@ -190,7 +192,7 @@ select.btn { appearance: none; padding-right: 14px; cursor: pointer; }
 }
 .add-task-btn { font-weight: 600; color: var(--accent); }
 .plus-badge {
-  width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; color: #fff;
+  width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; color: var(--on-accent);
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
 }
 .add-task-btn:hover, .search-btn:hover { background: var(--hover); }
@@ -502,7 +504,7 @@ select.btn { appearance: none; padding-right: 14px; cursor: pointer; }
 .nav-item .ico { display: grid; place-items: center; color: var(--muted); }
 .nav-item.active .ico { color: var(--accent); }
 .nav-item .ico .ic { width: 17px; height: 17px; }
-.brand .logo .ic { width: 64%; height: 64%; }
+.brand .logo .ic { width: 70%; height: 70%; stroke-width: 2.3; }
 .plus-badge .ic { width: 13px; height: 13px; stroke-width: 2.6; }
 .search-btn .ic { color: var(--muted); }
 .btn .ic { width: 15px; height: 15px; }
@@ -547,3 +549,27 @@ select.btn { appearance: none; padding-right: 14px; cursor: pointer; }
 .dl.urgent .ic.cal path, .dl.overdue .ic.cal path { fill: #fff; }
 
 .date-pill.overridden { opacity: .4; }
+
+/* Star field over the night sky (dark mode only); a few stars twinkle slowly. */
+.backdrop::before, .backdrop::after { content: ""; position: absolute; inset: 0; opacity: 0; transition: opacity .6s; }
+.backdrop::before {
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, #fff 60%, transparent), radial-gradient(1px 1px at 27% 72%, #fff 60%, transparent),
+    radial-gradient(1.4px 1.4px at 41% 33%, #f6dc96 60%, transparent), radial-gradient(1px 1px at 58% 12%, #fff 60%, transparent),
+    radial-gradient(1px 1px at 66% 58%, #fff 60%, transparent), radial-gradient(1.6px 1.6px at 79% 26%, #fff 60%, transparent),
+    radial-gradient(1px 1px at 88% 81%, #fff 60%, transparent), radial-gradient(1px 1px at 7% 88%, #fff 60%, transparent),
+    radial-gradient(1.2px 1.2px at 35% 92%, #f6dc96 60%, transparent), radial-gradient(1px 1px at 93% 47%, #fff 60%, transparent),
+    radial-gradient(1px 1px at 51% 79%, #fff 60%, transparent), radial-gradient(1px 1px at 19% 45%, #fff 60%, transparent);
+  background-size: 640px 640px;
+}
+.backdrop::after {
+  background-image:
+    radial-gradient(1.8px 1.8px at 22% 30%, #f6dc96 60%, transparent), radial-gradient(1.5px 1.5px at 72% 64%, #fff 60%, transparent),
+    radial-gradient(1.5px 1.5px at 84% 14%, #fff 60%, transparent), radial-gradient(1.8px 1.8px at 46% 86%, #f6dc96 60%, transparent);
+  background-size: 900px 900px;
+  animation: twinkle 6s ease-in-out infinite alternate;
+}
+:root[data-theme="dark"] .backdrop::before { opacity: .55; }
+:root[data-theme="dark"] .backdrop::after { opacity: .8; }
+@keyframes twinkle { from { filter: brightness(.6); } to { filter: brightness(1.4); } }
+@media (prefers-reduced-motion: reduce) { .backdrop::after { animation: none; } }
