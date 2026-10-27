@@ -74,7 +74,9 @@ This produces `dist/Capri-Setup-<version>.exe` (installer) and `dist/Capri-Porta
 
 ## Phone app (iPhone / Android)
 
-No App Store or developer account needed. Open your Capri address (e.g. https://capri.kalculator.lol) in **Safari** → Share → **Add to Home Screen**. The ♑ icon then opens Capri full screen in its own window, stays signed in, and picks up server updates automatically. On Android, use Chrome → menu → *Add to Home screen* / *Install app*.
+No App Store or developer account needed. Open your Capri address (e.g. https://capri.kalculator.lol) in **Safari** → Share → **Add to Home Screen**. The ♑ icon then opens Capri full screen in its own window, and stays signed in. On Android, use Chrome → menu → *Add to Home screen* / *Install app*.
+
+Capri keeps a copy of itself and your last tasks on the device (`public/sw.js`), so it opens instantly and still shows your tasks with no signal. Updates download in the background; a *Capri has been updated · Reload* notice appears when one is ready. Signing out deletes the saved tasks.
 
 (A Shortcuts *Open URLs* action always opens a Safari tab with the browser bars, so use the home-screen icon for full screen.)
 

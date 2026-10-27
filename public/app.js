@@ -2170,6 +2170,15 @@ function showConnect() {
   $('#connect').classList.remove('hidden');
 }
 
+// Offline cache: the app opens from this device's copy and refreshes it in the background.
+// When a newer version has been downloaded, offer to switch to it.
+if ('serviceWorker' in navigator && isSecureContext) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data === 'capri-updated') toast('Capri has been updated', { label: 'Reload', run: () => location.reload() });
+  });
+}
+
 async function boot() {
   applyTheme(store.get('theme', matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   state.sort = store.get('sort', 'smart');
@@ -2386,6 +2395,8 @@ $('#timer-task').addEventListener('click', () => timer.taskId && taskById(timer.
 $('#disconnect-btn').addEventListener('click', async () => {
   if (!(await askConfirm('Sign out of Capri?', { body: 'Only on this device. Sign back in any time with your Todoist token.', ok: 'Sign out', icon: 'external' }))) return;
   await api('POST', '/api/disconnect');
+  // Forget this account's tasks saved for offline use (see sw.js).
+  try { await caches.delete('capri-data-v1'); } catch { /* no cache storage */ }
   state.tasks = [];
   showConnect();
 });
