@@ -886,8 +886,8 @@ function animateSync(before, { full = false, edits = false } = {}) {
   // so nothing slides up through a row that's still fading out.
   const current = new Set($$('.task[data-task]', $('#view')).map((el) => el.dataset.task));
   const leaving = [...before].filter(([id, { el, rect }]) => !current.has(id) && rect.height && rect.bottom > 0 && rect.top < innerHeight
-    && !el.matches('.done-anim, .swipe-gone, .resched-out'));
-  const wait = leaving.length ? 200 : 0;
+    && !el.matches('.done-anim, .swipe-gone, .resched-out, .leave-anim'));
+  const wait = leaving.length ? 250 : 0;
   const glide = (el, dx, dy) => el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 480, delay: wait, easing: SYNC_EASE, fill: 'backwards' });
   let arriving = 0;
   for (const el of $$('.task[data-task]', $('#view'))) {
@@ -1590,13 +1590,19 @@ async function reopenTask(id) {
 async function deleteTask(id) {
   const t = taskById(id);
   if (!t || !(await askConfirm('Delete this task?', { body: `“${plain(t.content)}” will be deleted from Todoist. This can't be undone.`, ok: 'Delete', danger: true }))) return;
+  // The row leaves straight away instead of sitting there while Todoist answers.
+  const rows = $$(`#view [data-task="${id}"]`);
+  rows.forEach((row) => row.classList.add('leave-anim'));
   try {
-    await api('DELETE', `/api/tasks/${id}`);
+    await Promise.all([api('DELETE', `/api/tasks/${id}`), new Promise((r) => setTimeout(r, reducedMotion() ? 0 : 260))]);
     state.tasks = state.tasks.filter((x) => x.id !== id && x.parent_id !== id);
     closeDetail();
     renderAnimated();
     toast('Task deleted');
-  } catch (err) { toast(err.message); }
+  } catch (err) {
+    rows.forEach((row) => row.classList.remove('leave-anim'));
+    toast(err.message);
+  }
 }
 
 // Swipe-delete: the task disappears now and is deleted from Todoist once the undo window passes.
