@@ -110,6 +110,7 @@ async function api(method, url, body) {
 async function sync({ quiet = false } = {}) {
   try {
     const [data, { drawings }] = await Promise.all([api('GET', '/api/bootstrap'), api('GET', '/api/drawings')]);
+    data.tasks = data.tasks.filter((x) => !pendingDeletes.has(x.id) && !pendingDeletes.has(x.parent_id));
     Object.assign(state, data, { drawings, lastSync: Date.now() });
     loadDoneToday();
     render();
@@ -484,6 +485,85 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('resize', closeDropdown);
 document.addEventListener('scroll', (e) => { if (ddOpen && !ddOpen.menu.contains(e.target)) closeDropdown(); }, true);
 
+// ---------- touch gestures ----------
+// Swipe a task right to complete it, left to delete it (with undo).
+const SWIPE_COMMIT = 0.33; // share of the row's width to pass before letting go
+let swipe = null;
+let swipeEndedAt = 0;
+
+document.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch' || swipe) return;
+  const row = e.target.closest('#view .task[data-task]');
+  if (!row || e.target.closest('input, textarea, select, button.icon-btn')) return;
+  swipe = { row, id: row.dataset.task, pid: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, active: false };
+});
+
+document.addEventListener('pointermove', (e) => {
+  if (!swipe || e.pointerId !== swipe.pid) return;
+  const dx = e.clientX - swipe.x;
+  const dy = e.clientY - swipe.y;
+  if (!swipe.active) {
+    // Mostly vertical: it's a scroll, let it be.
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; }
+    if (Math.abs(dx) < 10) return;
+    swipe.active = true;
+    swipe.row.classList.add('swiping');
+  }
+  // Past the end of the row the drag gets heavier, like pulling on elastic.
+  const w = swipe.row.offsetWidth;
+  const eased = Math.abs(dx) > w * 0.6 ? Math.sign(dx) * (w * 0.6 + (Math.abs(dx) - w * 0.6) * 0.3) : dx;
+  swipe.dx = dx;
+  swipe.row.style.setProperty('--sx', `${eased}px`);
+  swipe.row.dataset.swipe = dx > 0 ? 'complete' : 'delete';
+  swipe.row.classList.toggle('swipe-armed', Math.abs(dx) > w * SWIPE_COMMIT);
+});
+
+function endSwipe(e) {
+  if (!swipe || e.pointerId !== swipe.pid) return;
+  const { row, id, dx, active } = swipe;
+  swipe = null;
+  if (!active) return;
+  swipeEndedAt = Date.now();
+  row.classList.remove('swiping', 'swipe-armed');
+  const commit = e.type === 'pointerup' && Math.abs(dx) > row.offsetWidth * SWIPE_COMMIT;
+  if (commit && dx > 0) {
+    row.style.setProperty('--sx', '0px');
+    completeTask(id);
+  } else if (commit) {
+    row.style.setProperty('--sx', `-${row.offsetWidth + 40}px`);
+    row.classList.add('swipe-gone');
+    setTimeout(() => deleteTaskSoon(id), 280);
+  } else {
+    row.style.setProperty('--sx', '0px');
+    setTimeout(() => { if (!row.classList.contains('swiping')) delete row.dataset.swipe; }, 400);
+  }
+}
+document.addEventListener('pointerup', endSwipe);
+document.addEventListener('pointercancel', endSwipe);
+// The tap that ends a swipe shouldn't also open the task.
+document.addEventListener('click', (e) => {
+  if (Date.now() - swipeEndedAt < 400) { e.stopPropagation(); e.preventDefault(); }
+}, true);
+
+// ---------- liquid light ----------
+// A soft highlight follows the mouse across glass panels and task rows.
+let lightTarget = null;
+let lightFrame = 0;
+document.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  const el = e.target.closest?.('.glass, .task');
+  if (el !== lightTarget) { lightTarget?.classList.remove('lit'); lightTarget = el; el?.classList.add('lit'); }
+  if (!el || lightFrame) return;
+  const { clientX, clientY } = e;
+  lightFrame = requestAnimationFrame(() => {
+    lightFrame = 0;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty('--mx', `${clientX - r.left}px`);
+    el.style.setProperty('--my', `${clientY - r.top}px`);
+  });
+}, { passive: true });
+document.documentElement.addEventListener('mouseleave', () => { lightTarget?.classList.remove('lit'); lightTarget = null; });
+
 // ---------- routing ----------
 
 function setView(view) {
@@ -499,6 +579,20 @@ function applyHash() {
   state.picked.clear();
   $('#sidebar').classList.remove('open');
   render();
+  animateViewIn();
+}
+
+// Rows flow in one after another when you switch views (not on background re-renders).
+let viewEnterTimer;
+function animateViewIn() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const main = $('.main');
+  main.classList.remove('view-enter');
+  void main.offsetWidth; // restart the animation
+  $$('.task, .group-head, .card, .empty', $('#view')).slice(0, 24).forEach((el, i) => el.style.setProperty('--i', i));
+  main.classList.add('view-enter');
+  clearTimeout(viewEnterTimer);
+  viewEnterTimer = setTimeout(() => main.classList.remove('view-enter'), 1000);
 }
 
 // ---------- rendering ----------
@@ -1111,6 +1205,32 @@ async function deleteTask(id) {
     toast('Task deleted');
   } catch (err) { toast(err.message); }
 }
+
+// Swipe-delete: the task disappears now and is deleted from Todoist once the undo window passes.
+const pendingDeletes = new Map();
+function deleteTaskSoon(id) {
+  const removed = state.tasks.filter((x) => x.id === id || x.parent_id === id);
+  if (!removed.length) return;
+  state.tasks = state.tasks.filter((x) => !removed.includes(x));
+  state.picked.delete(id);
+  if (state.detailId === id) closeDetail();
+  render();
+  const commit = () => {
+    if (!pendingDeletes.delete(id)) return;
+    api('DELETE', `/api/tasks/${id}`).catch((err) => { state.tasks.push(...removed); render(); toast(err.message); });
+  };
+  pendingDeletes.set(id, commit);
+  setTimeout(commit, 6000);
+  toast('Task deleted', {
+    label: 'Undo',
+    run: () => { if (pendingDeletes.delete(id)) { state.tasks.push(...removed); render(); } },
+  });
+}
+// Closing the app mid-undo still deletes; keepalive lets the request outlive the page.
+addEventListener('pagehide', () => {
+  for (const id of pendingDeletes.keys()) fetch(`/api/tasks/${id}`, { method: 'DELETE', keepalive: true });
+  pendingDeletes.clear();
+});
 
 async function duplicateTask(id) {
   const t = taskById(id);

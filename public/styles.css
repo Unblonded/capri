@@ -722,3 +722,124 @@ select[data-dd] { display: none !important; } /* .btn styles would otherwise ove
 :root[data-theme="capri"] .ring circle[stroke^="url"] { filter: drop-shadow(0 0 4px rgba(255, 46, 92, .6)); }
 :root[data-theme="capri"] ::selection { background: rgba(43, 255, 116, .3); }
 :root[data-theme="capri"] .dd-opt.on, :root[data-theme="capri"] .add-task-btn { color: var(--accent); }
+
+/* ======================================================================
+   Liquid motion + touch
+   ====================================================================== */
+:root {
+  --spring: cubic-bezier(.34, 1.56, .64, 1);      /* overshoots a touch, then settles */
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --sheen: rgba(255, 255, 255, .55);
+}
+:root[data-theme="dark"] { --sheen: rgba(246, 220, 150, .09); }
+:root[data-theme="capri"] { --sheen: rgba(255, 46, 92, .14); }
+
+/* No tap-to-zoom on phones: iOS zooms into any field under 16px, and double-tap zooms too. */
+html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
+@media (pointer: coarse) {
+  input, textarea, select { font-size: 16px !important; }
+}
+
+/* ---- thicker, wetter glass ---- */
+.glass {
+  box-shadow: var(--shadow), inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 var(--glass-shade),
+    inset 0 0 28px -10px var(--glass-edge);
+}
+/* A soft gloss across the top of each pane, like light caught in curved glass. */
+.glass::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--glass-edge) 45%, transparent), transparent 28%);
+  opacity: .7;
+}
+/* The pointer light. */
+.glass.lit, .task.lit {
+  background-image: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), var(--sheen), transparent 70%);
+}
+.task.lit { background-image: radial-gradient(180px circle at var(--mx, 50%) var(--my, 50%), var(--sheen), transparent 70%); }
+
+/* ---- springy controls ---- */
+.btn, .icon-btn, .link-btn, .nav-item, .seg button, .dd-btn, .check, .date-pill, .chip {
+  transition: transform .45s var(--spring), background .2s, box-shadow .25s, color .15s, border-color .2s, filter .2s;
+}
+.btn:active, .dd-btn:active, .date-pill:active, .chip:active { transform: scale(.94); transition-duration: .12s; }
+.icon-btn:active, .link-btn:active { transform: scale(.86); transition-duration: .12s; }
+.nav-item:active { transform: scale(.97); transition-duration: .12s; }
+@media (hover: hover) {
+  .btn:hover { transform: translateY(-1px); }
+  .btn.primary:hover { box-shadow: 0 10px 26px var(--accent-soft), inset 0 1px 0 rgba(255,255,255,.45); }
+  .nav-item:hover .ico { transform: scale(1.12); }
+  .task:hover { transform: translateY(-1px); box-shadow: 0 6px 18px var(--glass-shade), inset 0 1px 0 var(--glass-edge); }
+}
+.nav-item .ico { transition: transform .45s var(--spring), color .15s; }
+.task { transition: background .2s, border-color .2s, box-shadow .3s, transform .45s var(--spring); }
+
+/* ---- completing ---- */
+.task.done-anim { animation: done .55s var(--ease-out) forwards; }
+.task.done-anim .check { animation: check-pop .5s var(--spring); }
+@keyframes check-pop {
+  0% { transform: scale(.6); box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 60%, transparent); }
+  60% { transform: scale(1.18); }
+  100% { transform: scale(1); box-shadow: 0 0 0 12px transparent; }
+}
+@keyframes done {
+  30% { transform: scale(.985); }
+  100% { opacity: 0; transform: translateX(28px) scale(.97); filter: blur(3px); }
+}
+
+/* ---- arriving ---- */
+.view-enter .task, .view-enter .group-head, .view-enter .card, .view-enter .empty {
+  animation: flow-in .55s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 26ms);
+}
+.view-enter .main-head h1, .view-enter .main-head .sub { animation: flow-in .5s var(--ease-out) both; }
+@keyframes flow-in { from { opacity: 0; transform: translateY(12px) scale(.985); filter: blur(5px); } }
+
+.modal { animation: modal-fade .25s ease; }
+@keyframes modal-fade { from { opacity: 0; -webkit-backdrop-filter: blur(0); backdrop-filter: blur(0); } }
+.modal-card { animation: liquid-pop .48s var(--spring); }
+@keyframes liquid-pop {
+  0% { opacity: 0; transform: translateY(18px) scale(.9); filter: blur(8px); border-radius: 40px; }
+  60% { opacity: 1; filter: blur(0); }
+}
+.detail { animation: drawer-in .5s var(--ease-out); }
+@keyframes drawer-in { from { opacity: 0; transform: translateX(36px) scale(.97); filter: blur(6px); } }
+.toast { animation: toast-in .5s var(--spring); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(16px) scale(.9); } }
+.dd-menu { animation: menu-in .28s var(--ease-out); transform-origin: top; }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-6px) scale(.96); } }
+@media (max-width: 760px) {
+  .sidebar { transition: transform .5s var(--ease-out); }
+}
+
+/* ---- swipe a task: right completes, left deletes ---- */
+.task > * { transform: translateX(var(--sx, 0)); transition: transform .5s var(--spring); }
+.task.swiping > * { transition: none; }
+.task.swipe-gone > * { transition: transform .28s var(--ease-out); }
+.task.swipe-gone { transition: opacity .28s; opacity: 0; }
+.task[data-swipe] { overflow: hidden; transform: none !important; }
+.task[data-swipe="complete"] { background: color-mix(in srgb, var(--green) 20%, transparent); }
+.task[data-swipe="delete"] { background: color-mix(in srgb, var(--p1) 20%, transparent); }
+.task.swipe-armed[data-swipe="complete"] { background: var(--green); }
+.task.swipe-armed[data-swipe="delete"] { background: var(--p1); }
+.task[data-swipe]::after {
+  content: ""; position: absolute; top: 50%; width: 22px; height: 22px; margin-top: -11px;
+  background: currentColor; transition: transform .4s var(--spring), color .2s; transform: scale(.7);
+  -webkit-mask: var(--swipe-icon) center / contain no-repeat; mask: var(--swipe-icon) center / contain no-repeat;
+}
+.task[data-swipe="complete"]::after {
+  left: 18px; color: var(--green);
+  --swipe-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 12.5l5 5 10-11'/%3E%3C/svg%3E");
+}
+.task[data-swipe="delete"]::after {
+  right: 18px; color: var(--p1);
+  --swipe-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3'/%3E%3C/svg%3E");
+}
+.task.swipe-armed::after { color: #fff; transform: scale(1.15); }
+@media (hover: none) {
+  .task { touch-action: pan-y; }
+  .task-actions { display: none; }     /* no hover on phones; swipe and the drawer cover these */
+  .task:active:not([data-swipe]) { transform: scale(.985); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
