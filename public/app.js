@@ -694,7 +694,12 @@ document.addEventListener('scroll', (e) => { if (datePop && !datePop.el.contains
 
 // ---------- task right-click menu ----------
 let ctxMenu = null;
-function closeTaskMenu() { ctxMenu?.remove(); ctxMenu = null; }
+function closeTaskMenu() {
+  if (!ctxMenu) return;
+  ctxMenu.remove();
+  ctxMenu = null;
+  if (isTouch() && !state.detailId) clearSelection();
+}
 
 function openTaskMenu(id, x, y) {
   const t = taskById(id);
@@ -1421,7 +1426,17 @@ function openDetail(id, focusSel) {
   }
 }
 
-function closeDetail() { state.detailId = null; renderDetail(); }
+function closeDetail() {
+  state.detailId = null;
+  renderDetail();
+  if (isTouch()) clearSelection();
+}
+// Phones have no keyboard to move the selection with, so it only lasts while a task's drawer or menu is open.
+const isTouch = () => matchMedia('(hover: none)').matches;
+function clearSelection() {
+  state.selectedId = null;
+  $$('.task.selected').forEach((el) => el.classList.remove('selected'));
+}
 
 // ---------- mutations ----------
 

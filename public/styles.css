@@ -87,6 +87,8 @@ kbd {
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
 ::selection { background: var(--accent-soft); }
 
+/* Hover looks are wrapped in (hover: hover): on phones a tap would leave them stuck on until you tap elsewhere. */
+
 /* ---------- ambient backdrop ---------- */
 .backdrop { position: fixed; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
 .blob { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.75; animation: drift 28s ease-in-out infinite alternate; }
@@ -146,16 +148,16 @@ kbd {
   background: var(--glass-inset); text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   box-shadow: inset 0 1px 0 var(--glass-edge); transition: transform .12s, background .15s, box-shadow .15s; color: var(--text);
 }
-.btn:hover { background: var(--hover); }
+@media (hover: hover) { .btn:hover { background: var(--hover); } }
 .btn:active { transform: scale(0.97); }
 .btn.sm { padding: 5px 12px; font-size: 12.5px; }
 .btn.primary {
   background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--on-accent); border-color: transparent;
   box-shadow: 0 6px 18px var(--accent-soft), inset 0 1px 0 rgba(255,255,255,.4);
 }
-.btn.primary:hover { filter: brightness(1.06); }
+@media (hover: hover) { .btn.primary:hover { filter: brightness(1.06); } }
 .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
-.btn.ghost:hover { background: var(--hover); }
+@media (hover: hover) { .btn.ghost:hover { background: var(--hover); } }
 .btn.wide { width: 100%; }
 .btn:disabled { opacity: 0.5; cursor: default; }
 select.btn { appearance: none; padding-right: 14px; cursor: pointer; }
@@ -167,10 +169,10 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
   border: 0; background: transparent; border-radius: 10px; width: 32px; height: 32px; flex-shrink: 0;
   display: grid; place-items: center; color: var(--muted); font-size: 15px; text-decoration: none; transition: background .15s;
 }
-.icon-btn:hover { background: var(--hover); color: var(--text); }
+@media (hover: hover) { .icon-btn:hover { background: var(--hover); color: var(--text); } }
 .icon-btn.sm { width: 22px; height: 22px; font-size: 13px; border-radius: 7px; }
 .link-btn { border: 0; background: none; color: var(--muted); padding: 4px 8px; border-radius: 8px; }
-.link-btn:hover { color: var(--text); background: var(--hover); }
+@media (hover: hover) { .link-btn:hover { color: var(--text); background: var(--hover); } }
 .seg { display: inline-flex; background: var(--glass-inset); border: 1px solid var(--glass-border); border-radius: 999px; padding: 3px; gap: 2px; }
 .seg button { border: 0; background: none; padding: 5px 12px; border-radius: 999px; color: var(--muted); font-size: 12.5px; font-weight: 500; transition: all .15s; }
 .seg button.on { background: var(--glass-strong); color: var(--text); box-shadow: 0 2px 8px var(--glass-shade), inset 0 1px 0 var(--glass-edge); }
@@ -202,7 +204,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
   width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; color: var(--on-accent);
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
 }
-.add-task-btn:hover, .search-btn:hover { background: var(--hover); }
+@media (hover: hover) { .add-task-btn:hover, .search-btn:hover { background: var(--hover); } }
 .nav { display: flex; flex-direction: column; gap: 1px; }
 .nav-group { margin-top: 14px; }
 .nav-title {
@@ -213,7 +215,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
   display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 12px;
   border: 1px solid transparent; background: none; text-align: left; width: 100%; color: var(--text); transition: background .15s;
 }
-.nav-item:hover { background: var(--hover); }
+@media (hover: hover) { .nav-item:hover { background: var(--hover); } }
 .nav-item.active { background: var(--active); border-color: var(--glass-border); box-shadow: 0 2px 10px var(--glass-shade), inset 0 1px 0 var(--glass-edge); font-weight: 600; }
 .nav-item.drop-hover { background: var(--accent-soft); border-color: var(--accent); }
 .nav-item .ico { width: 18px; text-align: center; flex-shrink: 0; }
@@ -267,7 +269,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
   display: flex; gap: 12px; align-items: flex-start; padding: 11px 10px; margin: 3px 0;
   cursor: pointer; border-radius: 14px; position: relative; border: 1px solid transparent; transition: background .15s, border-color .15s, box-shadow .15s;
 }
-.task:hover { background: var(--hover); border-color: var(--glass-border); }
+@media (hover: hover) { .task:hover { background: var(--hover); border-color: var(--glass-border); } }
 .task.selected { background: var(--active); border-color: var(--glass-border); box-shadow: 0 4px 16px var(--glass-shade), inset 0 1px 0 var(--glass-edge); }
 .task.picked { background: var(--accent-soft); border-color: var(--accent); }
 .task.dragging { opacity: 0.4; }
@@ -280,7 +282,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .check.p1 { border-color: var(--p1); background: color-mix(in srgb, var(--p1) 14%, transparent); }
 .check.p2 { border-color: var(--p2); background: color-mix(in srgb, var(--p2) 14%, transparent); }
 .check.p3 { border-color: var(--p3); background: color-mix(in srgb, var(--p3) 14%, transparent); }
-.check:hover { color: var(--muted); transform: scale(1.1); }
+@media (hover: hover) { .check:hover { color: var(--muted); transform: scale(1.1); } }
 .check.p1:hover { color: var(--p1); } .check.p2:hover { color: var(--p2); } .check.p3:hover { color: var(--p3); }
 .check.checked { background: var(--green); border-color: var(--green); color: #fff; }
 .task-body { flex: 1; min-width: 0; }
@@ -315,7 +317,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
   display: flex; align-items: center; gap: 12px; padding: 9px 10px; color: var(--muted); border: 0;
   background: none; width: 100%; text-align: left; border-radius: 12px;
 }
-.inline-add:hover { color: var(--accent); background: var(--hover); }
+@media (hover: hover) { .inline-add:hover { color: var(--accent); background: var(--hover); } }
 .inline-add .plus { color: var(--accent); font-size: 16px; width: 20px; text-align: center; }
 .banner {
   display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 14px; margin-bottom: 16px; cursor: pointer;
@@ -354,7 +356,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 /* ---------- sketches ---------- */
 .sketch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
 .sketch { padding: 8px; border-radius: 18px; cursor: pointer; transition: transform .15s; }
-.sketch:hover { transform: translateY(-2px); }
+@media (hover: hover) { .sketch:hover { transform: translateY(-2px); } }
 .sketch img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #fffdf8; border-radius: 12px; display: block; }
 .sketch .s-title { font-weight: 600; font-size: 13px; padding: 8px 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sketch .s-sub { font-size: 11.5px; color: var(--muted); padding: 2px 4px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -391,7 +393,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .qchip {
   border: 1px solid var(--glass-border); background: var(--glass-inset); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--muted);
 }
-.qchip:hover { color: var(--text); background: var(--hover); }
+@media (hover: hover) { .qchip:hover { color: var(--text); background: var(--hover); } }
 .field { display: grid; grid-template-columns: 80px 1fr; gap: 10px; align-items: center; font-size: 13px; }
 .field > span { color: var(--muted); }
 .field input, .field select { width: 100%; }
@@ -438,7 +440,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .hl-dl { --mk: color-mix(in srgb, var(--deadline) 24%, transparent); }
 .quick-preview .chip.datec { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
 .chip-x { border: 0; background: none; color: inherit; padding: 0; margin-left: 2px; display: grid; place-items: center; opacity: .7; }
-.chip-x:hover { opacity: 1; }
+@media (hover: hover) { .chip-x:hover { opacity: 1; } }
 .chip-x .ic { width: 12px; height: 12px; }
 .quick-card textarea { color: var(--muted); }
 .quick-dates { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -611,7 +613,7 @@ select[data-dd] { display: none !important; } /* .btn styles would otherwise ove
   width: 100%; padding: 9px 12px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-inset);
   color: var(--text); text-align: left; cursor: pointer; transition: border-color .15s, box-shadow .15s;
 }
-.dd-field:hover { background: var(--hover); }
+@media (hover: hover) { .dd-field:hover { background: var(--hover); } }
 .dd-field:focus-visible, .dd-field[aria-expanded="true"] { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .dd-menu {
   position: fixed; z-index: 90; overflow-y: auto; padding: 6px; border-radius: 16px; max-width: min(420px, calc(100vw - 20px));
@@ -961,7 +963,8 @@ html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -we
 /* ---- task right-click menu (borrows the dropdown menu's look) ---- */
 .ctx-menu { min-width: 210px; padding: 5px; }
 .ctx-menu .dd-opt { width: 100%; border: 0; background: none; color: var(--text); text-align: left; font-size: 13px; }
-.ctx-menu .dd-opt:hover, .ctx-menu .dd-opt:focus-visible { background: var(--active); outline: none; }
+.ctx-menu .dd-opt:focus-visible { background: var(--active); outline: none; }
+@media (hover: hover) { .ctx-menu .dd-opt:hover { background: var(--active); } }
 .ctx-menu .dd-opt .ic { color: var(--muted); }
 .ctx-menu .dd-opt.danger, .ctx-menu .dd-opt.danger .ic { color: var(--p1); }
 .ctx-sep { height: 1px; background: var(--line); margin: 4px 6px; }
@@ -973,7 +976,7 @@ html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -we
   border-radius: 8px; padding: 4px 0; font-size: 12px; font-weight: 700;
   transition: transform .2s var(--spring), background .15s, color .15s;
 }
-.ctx-p:hover { background: var(--hover); }
+@media (hover: hover) { .ctx-p:hover { background: var(--hover); } }
 .ctx-p:active { transform: scale(.92); }
 .ctx-p.p1 { color: var(--p1); } .ctx-p.p2 { color: var(--p2); } .ctx-p.p3 { color: var(--p3); }
 .ctx-p.on { background: color-mix(in srgb, currentColor 18%, transparent); border-color: currentColor; }
@@ -1020,7 +1023,7 @@ img, svg { -webkit-user-drag: none; }
   transition: border-color .15s, background .15s, transform .3s var(--spring);
 }
 .date-field span { overflow: hidden; text-overflow: ellipsis; }
-.date-field:hover { background: var(--hover); }
+@media (hover: hover) { .date-field:hover { background: var(--hover); } }
 .date-field:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .date-field.empty span { color: var(--muted); }
 .date-field .cal { width: 16px; height: 16px; flex-shrink: 0; }
@@ -1044,7 +1047,7 @@ img, svg { -webkit-user-drag: none; }
   font-size: 12.5px; font-variant-numeric: tabular-nums; padding: 0;
   transition: background .12s, transform .25s var(--spring);
 }
-.dp-day:hover { background: var(--hover); }
+@media (hover: hover) { .dp-day:hover { background: var(--hover); } }
 .dp-day:active { transform: scale(.88); }
 .dp-day:focus-visible { outline: none; border-color: var(--accent); }
 .dp-day.out { color: var(--faint); }
