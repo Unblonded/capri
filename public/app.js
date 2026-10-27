@@ -1473,9 +1473,9 @@ function renderPalette() {
     { label: 'Go to Focus', run: () => setView({ type: 'focus' }) },
     { label: 'Go to Sketches', run: () => setView({ type: 'sketches' }) },
     { label: 'Go to Completed', run: () => setView({ type: 'completed' }) },
-    { label: 'Theme: Light', run: () => applyTheme('light') },
-    { label: 'Theme: Dark', run: () => applyTheme('dark') },
-    { label: 'Theme: Capri (neon)', run: () => applyTheme('capri') },
+    { label: 'Theme: Light', run: () => switchTheme('light') },
+    { label: 'Theme: Dark', run: () => switchTheme('dark') },
+    { label: 'Theme: Capri (neon)', run: () => switchTheme('capri') },
     { label: 'Keyboard shortcuts', run: () => $('#help').classList.remove('hidden') },
     { label: 'Sync now', run: () => sync() },
     { label: 'New project', run: createProject },
@@ -1872,10 +1872,33 @@ function applyTheme(theme) {
   const btn = $('#theme-btn');
   if (btn) btn.title = `Theme: ${THEMES[theme]} (click to switch)`;
 }
+// Switching themes: the new one spreads out in a circle from where you clicked (or the middle).
+// Browsers without view transitions get a soft colour fade instead.
+function switchTheme(theme, from) {
+  if (theme === document.documentElement.dataset.theme) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return applyTheme(theme);
+  if (!document.startViewTransition) {
+    document.documentElement.classList.add('theme-fading');
+    applyTheme(theme);
+    setTimeout(() => document.documentElement.classList.remove('theme-fading'), 600);
+    return;
+  }
+  const r = from?.getBoundingClientRect();
+  const x = r ? r.left + r.width / 2 : innerWidth / 2;
+  const y = r ? r.top + r.height / 2 : innerHeight / 2;
+  const radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+  const t = document.startViewTransition(() => applyTheme(theme));
+  t.ready.then(() => {
+    document.documentElement.animate(
+      { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+      { duration: 700, easing: 'cubic-bezier(.65, 0, .35, 1)', pseudoElement: '::view-transition-new(root)' },
+    );
+  }).catch(() => {});
+}
 function toggleTheme() {
   const order = Object.keys(THEMES);
   const next = order[(order.indexOf(document.documentElement.dataset.theme) + 1) % order.length];
-  applyTheme(next);
+  switchTheme(next, $('#theme-btn'));
   toast(`Theme: ${THEMES[next]}`);
 }
 

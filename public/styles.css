@@ -627,103 +627,210 @@ select[data-dd] { display: none !important; } /* .btn styles would otherwise ove
 .dd-opt.on { color: var(--accent); font-weight: 600; }
 .dd-opt .ic { width: 14px; height: 14px; flex-shrink: 0; stroke-width: 2.4; }
 
-/* ============ Capri theme: neon red glitter, acid green and violet over near-black, with shattered shards ============ */
+/* ============ Capri: the flagship neon theme ============
+   Drawn from the Edgerunners S2 reference: hot-red glitter shards, an acid-green splinter and violet
+   glitch offsets over near-black slate, with HUD corner ticks, chromatic-split type, halftone and scanlines. */
 :root[data-theme="capri"] {
-  --bg: #0c0d12;
-  --glass: rgba(14, 14, 20, 0.5);
-  --glass-strong: rgba(18, 18, 26, 0.86);
-  --blur: blur(12px) saturate(160%);
-  --glass-inset: rgba(255, 255, 255, 0.04);
-  --glass-border: rgba(255, 46, 92, 0.22);
-  --glass-edge: rgba(255, 92, 138, 0.38);
-  --glass-shade: rgba(0, 0, 0, 0.45);
-  --hover: rgba(255, 46, 92, 0.08);
-  --active: rgba(255, 46, 92, 0.16);
+  --bg: #07070b;
+  --glass: rgba(12, 10, 17, 0.7);
+  --glass-strong: rgba(17, 14, 23, 0.9);
+  --blur: blur(14px) saturate(170%);
+  --glass-inset: rgba(255, 255, 255, 0.045);
+  --glass-border: rgba(255, 46, 92, 0.26);
+  --glass-edge: rgba(255, 106, 149, 0.45);
+  --glass-shade: rgba(0, 0, 0, 0.5);
+  --hover: rgba(255, 46, 92, 0.09);
+  --active: rgba(255, 46, 92, 0.17);
   --line: rgba(255, 255, 255, 0.07);
-  --text: #f6f0f6;
-  --muted: #a99db4;
-  --faint: #6b6177;
+  --text: #fbf3f7;
+  --muted: #b3a6bd;
+  --faint: #6f6479;
   --accent: #ff2e5c;
-  --accent-2: #ff5f8f;
+  --accent-2: #ff6a95;
   --accent-soft: rgba(255, 46, 92, 0.2);
-  --on-accent: #16030a;
-  --menu-bg: #14141c;
-  --neon-green: #2bff74;
-  --violet: #8b3dff;
+  --on-accent: #fff;
+  --menu-bg: #120f18;
+  --neon-green: #39ff88;
+  --violet: #9a4dff;
   --p1: #ff4766;
   --p2: #ffb21f;
-  --p3: #6f8cff;
-  --p4: #6b6177;
-  --green: #2bff74;
-  --deadline: #a65bff;
-  --shadow: 0 24px 70px rgba(0, 0, 0, 0.65), 0 2px 10px rgba(0, 0, 0, 0.4);
-  --night: linear-gradient(135deg, #1a1018, #08080c);
+  --p3: #7b93ff;
+  --p4: #74687e;
+  --green: #39ff88;
+  --deadline: #b06bff;
+  --shadow: 0 26px 80px rgba(0, 0, 0, 0.7), 0 2px 10px rgba(0, 0, 0, 0.45);
+  --night: linear-gradient(135deg, #1c0f19, #07070b);
+  --display: "Chakra Petch", Inter, sans-serif;
   color-scheme: dark;
 }
+/* A violet bloom up top and a red one down low, like neon spilling into a dark room. */
+:root[data-theme="capri"] body {
+  background:
+    radial-gradient(110% 75% at 85% -15%, rgba(154, 77, 255, .24), transparent 55%),
+    radial-gradient(90% 70% at -5% 115%, rgba(255, 46, 92, .22), transparent 60%),
+    var(--bg);
+}
+/* Faint scanlines over everything. */
+:root[data-theme="capri"] body::after {
+  content: ""; position: fixed; inset: 0; z-index: 100; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, .028) 0 1px, transparent 1px 3px);
+}
 
-/* Shattered shards instead of soft blobs: each one is a jagged neon-red glitter shard with a violet edge offset behind it. */
-:root[data-theme="capri"] .blob { filter: none; opacity: 1; border-radius: 0; background: none; animation: shard-drift 26s ease-in-out infinite alternate; }
+/* ---- shattered shards, now glowing and glitching ---- */
+:root[data-theme="capri"] .blob {
+  border-radius: 0; background: none; opacity: 1;
+  filter: drop-shadow(0 0 28px rgba(255, 46, 92, .45));
+  animation: shard-drift 26s ease-in-out infinite alternate, shard-glitch 9s steps(1) infinite;
+}
+:root[data-theme="capri"] .b2 { animation-delay: -6s, -3s; }
+:root[data-theme="capri"] .b3 { filter: drop-shadow(0 0 22px rgba(57, 255, 136, .5)); animation-delay: -12s, -5s; }
+:root[data-theme="capri"] .b4 { animation-delay: -18s, -7s; }
 :root[data-theme="capri"] .blob::before, :root[data-theme="capri"] .blob::after { content: ""; position: absolute; inset: 0; }
-:root[data-theme="capri"] .blob::before { background: var(--violet); transform: translate(10px, 8px); opacity: .55; }
+:root[data-theme="capri"] .blob::before { background: var(--violet); transform: translate(11px, 9px); opacity: .6; }
 :root[data-theme="capri"] .blob::after {
   background:
-    radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.9) 50%, transparent), radial-gradient(1px 1px at 70% 60%, rgba(255,255,255,.8) 50%, transparent),
-    radial-gradient(1px 1px at 45% 80%, rgba(255,255,255,.7) 50%, transparent), radial-gradient(1px 1px at 85% 20%, rgba(255,255,255,.85) 50%, transparent),
-    linear-gradient(160deg, #ff2e5c, #e0103f 70%);
-  background-size: 14px 14px, 18px 18px, 22px 22px, 26px 26px, 100% 100%;
+    radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.95) 50%, transparent), radial-gradient(1px 1px at 70% 60%, rgba(255,255,255,.85) 50%, transparent),
+    radial-gradient(1.2px 1.2px at 45% 80%, rgba(255,255,255,.75) 50%, transparent), radial-gradient(1px 1px at 85% 20%, rgba(255,255,255,.9) 50%, transparent),
+    linear-gradient(115deg, transparent 40%, rgba(255,255,255,.18) 48%, transparent 56%),
+    linear-gradient(160deg, #ff3d68, #e0103f 65%, #a80a35);
+  background-size: 14px 14px, 18px 18px, 22px 22px, 26px 26px, 300% 100%, 100% 100%;
+  animation: shard-shine 7s ease-in-out infinite;
 }
+@keyframes shard-shine { 0%, 100% { background-position: 0 0, 0 0, 0 0, 0 0, 120% 0, 0 0; } 50% { background-position: 0 0, 0 0, 0 0, 0 0, -20% 0, 0 0; } }
 :root[data-theme="capri"] .b1::before, :root[data-theme="capri"] .b1::after { clip-path: polygon(8% 0, 46% 14%, 38% 26%, 70% 18%, 62% 40%, 100% 30%, 74% 58%, 90% 72%, 52% 66%, 40% 100%, 30% 70%, 0 84%, 18% 52%, 2% 36%, 24% 30%); }
-:root[data-theme="capri"] .b1 { width: 38vw; height: 44vw; top: -8vw; left: -6vw; opacity: .7; }
+:root[data-theme="capri"] .b1 { width: 38vw; height: 44vw; top: -8vw; left: -6vw; }
 :root[data-theme="capri"] .b2::before, :root[data-theme="capri"] .b2::after { clip-path: polygon(30% 0, 52% 22%, 46% 34%, 100% 12%, 66% 48%, 82% 56%, 40% 100%, 50% 62%, 0 78%, 34% 44%, 12% 38%); }
-:root[data-theme="capri"] .b2 { width: 34vw; height: 38vw; bottom: -6vw; right: -4vw; opacity: .65; }
-/* One sliver of acid green, like a glitch splinter. */
+:root[data-theme="capri"] .b2 { width: 34vw; height: 38vw; bottom: -6vw; right: -4vw; opacity: .85; }
 :root[data-theme="capri"] .b3::before, :root[data-theme="capri"] .b3::after { clip-path: polygon(40% 0, 52% 0, 34% 40%, 58% 38%, 22% 100%, 30% 52%, 8% 54%); }
-:root[data-theme="capri"] .b3 { width: 12vw; height: 34vw; top: 30%; left: 20%; opacity: .8; }
-:root[data-theme="capri"] .b3::after { background: linear-gradient(170deg, var(--neon-green), #10c94f); }
+:root[data-theme="capri"] .b3 { width: 12vw; height: 34vw; top: 30%; left: 20%; opacity: .9; }
+:root[data-theme="capri"] .b3::after { background: linear-gradient(170deg, var(--neon-green), #12c956); }
 :root[data-theme="capri"] .b4::before, :root[data-theme="capri"] .b4::after { clip-path: polygon(0 20%, 60% 0, 44% 30%, 100% 34%, 50% 52%, 70% 100%, 26% 58%, 10% 70%); }
-:root[data-theme="capri"] .b4 { width: 20vw; height: 18vw; top: 10%; right: 16%; opacity: .5; }
+:root[data-theme="capri"] .b4 { width: 20vw; height: 18vw; top: 10%; right: 16%; opacity: .6; }
 @keyframes shard-drift { 0% { transform: translate(0, 0) rotate(0deg); } 100% { transform: translate(2vw, 1.5vh) rotate(3deg); } }
+/* Every few seconds a shard skips a couple of frames, like a bad signal. */
+@keyframes shard-glitch { 0%, 91%, 100% { translate: 0 0; } 92% { translate: -14px 3px; } 93.5% { translate: 9px -4px; } 95% { translate: -3px 0; } }
 
-/* Glitter dust over everything instead of a calm star field. */
+/* Glitter dust, and halftone dots fading in from two corners (anime print texture). */
 :root[data-theme="capri"] .backdrop::before {
-  opacity: .5;
+  opacity: .55;
   background-image:
-    radial-gradient(1px 1px at 12% 18%, #ff5f8f 60%, transparent), radial-gradient(1px 1px at 27% 72%, #fff 60%, transparent),
+    radial-gradient(1px 1px at 12% 18%, #ff6a95 60%, transparent), radial-gradient(1px 1px at 27% 72%, #fff 60%, transparent),
     radial-gradient(1.4px 1.4px at 41% 33%, #ff2e5c 60%, transparent), radial-gradient(1px 1px at 58% 12%, #fff 60%, transparent),
-    radial-gradient(1px 1px at 66% 58%, #2bff74 60%, transparent), radial-gradient(1.6px 1.6px at 79% 26%, #ff5f8f 60%, transparent),
-    radial-gradient(1px 1px at 88% 81%, #fff 60%, transparent), radial-gradient(1px 1px at 7% 88%, #8b3dff 60%, transparent),
+    radial-gradient(1px 1px at 66% 58%, #39ff88 60%, transparent), radial-gradient(1.6px 1.6px at 79% 26%, #ff6a95 60%, transparent),
+    radial-gradient(1px 1px at 88% 81%, #fff 60%, transparent), radial-gradient(1px 1px at 7% 88%, #9a4dff 60%, transparent),
     radial-gradient(1.2px 1.2px at 35% 92%, #ff2e5c 60%, transparent), radial-gradient(1px 1px at 93% 47%, #fff 60%, transparent);
   background-size: 420px 420px;
 }
-:root[data-theme="capri"] .backdrop::after { opacity: .7; }
+:root[data-theme="capri"] .backdrop::after {
+  opacity: 1; animation: none;
+  background: radial-gradient(rgba(255, 46, 92, .32) 1px, transparent 1.7px) 0 0 / 7px 7px;
+  -webkit-mask: radial-gradient(circle at 92% 8%, #000, transparent 32%), radial-gradient(circle at 4% 96%, #000, transparent 30%);
+  mask: radial-gradient(circle at 92% 8%, #000, transparent 32%), radial-gradient(circle at 4% 96%, #000, transparent 30%);
+}
 
-/* Neon details */
-:root[data-theme="capri"] .glass { box-shadow: var(--shadow), inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 rgba(139, 61, 255, .25); }
+/* ---- glass panels: neon edge (red into violet) and HUD corner ticks ---- */
+:root[data-theme="capri"] .glass {
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 106, 149, .3), inset 0 -1px 0 rgba(154, 77, 255, .3), inset 0 0 40px -18px rgba(255, 46, 92, .35);
+}
+:root[data-theme="capri"] .glass::before {
+  background: linear-gradient(135deg, rgba(255, 46, 92, .85), rgba(255, 46, 92, .1) 28%, transparent 50%, rgba(154, 77, 255, .15) 72%, rgba(154, 77, 255, .8));
+}
+:root[data-theme="capri"] .glass::after {
+  opacity: 1;
+  background:
+    linear-gradient(var(--accent), var(--accent)) left 7px top 7px / 12px 2px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) left 7px top 7px / 2px 12px no-repeat,
+    linear-gradient(var(--neon-green), var(--neon-green)) right 7px bottom 7px / 12px 2px no-repeat,
+    linear-gradient(var(--neon-green), var(--neon-green)) right 7px bottom 7px / 2px 12px no-repeat;
+}
+:root[data-theme="capri"] .modal-card {
+  box-shadow: var(--shadow), 0 0 0 1px rgba(255, 46, 92, .35), 0 0 48px rgba(255, 46, 92, .18);
+}
+
+/* ---- type: a techno display face with a chromatic split ---- */
+:root[data-theme="capri"] .main-head h1,
+:root[data-theme="capri"] .wordmark,
+:root[data-theme="capri"] .group-head,
+:root[data-theme="capri"] .nav-title,
+:root[data-theme="capri"] .timer-time,
+:root[data-theme="capri"] .modal-card h3 { font-family: var(--display); }
+:root[data-theme="capri"] .main-head h1 {
+  text-transform: uppercase; letter-spacing: .03em; font-weight: 700;
+  text-shadow: 2px 0 rgba(154, 77, 255, .85), -1.5px 0 rgba(57, 255, 136, .35);
+}
+:root[data-theme="capri"] .view-enter .main-head h1 { animation: capri-glitch-in .55s steps(1) both; }
+@keyframes capri-glitch-in {
+  0% { opacity: 0; }
+  15% { opacity: 1; clip-path: inset(0 0 55% 0); transform: translateX(-6px); }
+  30% { clip-path: inset(45% 0 0 0); transform: translateX(5px); text-shadow: -3px 0 #39ff88, 3px 0 #9a4dff; }
+  45% { clip-path: inset(20% 0 30% 0); transform: translateX(-2px); }
+  60%, 100% { clip-path: none; transform: none; }
+}
 :root[data-theme="capri"] .wordmark {
-  background: linear-gradient(100deg, #ff5f8f, #ff2e5c 55%, #ff2e5c);
+  display: inline-block; text-transform: uppercase; letter-spacing: .06em; font-weight: 700;
+  background: linear-gradient(100deg, #fff 0%, #ffc2d3 35%, #ff4f7a 80%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(1.5px 1.5px 0 rgba(139, 61, 255, .9));
+  filter: drop-shadow(1.5px 1.5px 0 rgba(154, 77, 255, .9));
+  animation: capri-wordmark 7s steps(1) infinite;
+}
+@keyframes capri-wordmark {
+  0%, 93%, 100% { transform: none; filter: drop-shadow(1.5px 1.5px 0 rgba(154, 77, 255, .9)); }
+  94% { transform: translateX(-2px) skewX(-10deg); filter: drop-shadow(-2px 0 0 #39ff88) drop-shadow(2px 0 0 #9a4dff); }
+  96% { transform: translateX(2px); filter: drop-shadow(2px 0 0 #39ff88) drop-shadow(-2px 0 0 #9a4dff); }
 }
 :root[data-theme="capri"] .brand .logo {
-  color: var(--accent); background: #0a0a0f;
-  box-shadow: inset 0 0 0 1px rgba(255, 46, 92, .45), 3px 3px 0 rgba(139, 61, 255, .6);
+  color: var(--accent); background: #0a0910;
+  box-shadow: inset 0 0 0 1px rgba(255, 46, 92, .5), 3px 3px 0 rgba(154, 77, 255, .7), 0 0 18px rgba(255, 46, 92, .3);
 }
-:root[data-theme="capri"] .brand .logo .ic { filter: drop-shadow(1px 1px 0 var(--violet)); }
+:root[data-theme="capri"] .brand .logo .ic { filter: drop-shadow(1px 1px 0 var(--violet)) drop-shadow(0 0 4px rgba(255, 46, 92, .7)); }
+
+/* ---- controls ---- */
 :root[data-theme="capri"] .btn.primary, :root[data-theme="capri"] .plus-badge {
   background:
-    radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.75) 50%, transparent), radial-gradient(1px 1px at 70% 65%, rgba(255,255,255,.6) 50%, transparent),
-    linear-gradient(135deg, #ff2e5c, #ff5f8f);
+    radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.8) 50%, transparent), radial-gradient(1px 1px at 70% 65%, rgba(255,255,255,.65) 50%, transparent),
+    linear-gradient(135deg, #ff2e5c, #ff6a95);
   background-size: 9px 9px, 13px 13px, 100% 100%;
-  color: #fff; box-shadow: 3px 3px 0 var(--violet), 0 6px 22px rgba(255, 46, 92, .35);
+  color: #fff; text-shadow: 0 1px 0 rgba(120, 0, 30, .5);
+  box-shadow: 3px 3px 0 var(--violet), 0 6px 24px rgba(255, 46, 92, .4);
+}
+@media (hover: hover) {
+  :root[data-theme="capri"] .btn.primary:hover { box-shadow: -3px 3px 0 var(--neon-green), 3px -1px 0 var(--violet), 0 8px 28px rgba(255, 46, 92, .5); }
+}
+:root[data-theme="capri"] .nav-pill {
+  background: linear-gradient(90deg, rgba(255, 46, 92, .3), rgba(255, 46, 92, .07) 70%, transparent);
+  border-color: rgba(255, 46, 92, .45);
+  box-shadow: inset 3px 0 0 var(--accent), 0 0 20px rgba(255, 46, 92, .2);
 }
 :root[data-theme="capri"] .nav-item.active { box-shadow: inset 3px 0 0 var(--accent), 0 2px 10px var(--glass-shade); }
-:root[data-theme="capri"] .task.selected { box-shadow: inset 3px 0 0 var(--neon-green), 0 4px 16px var(--glass-shade); }
-:root[data-theme="capri"] .check.checked { box-shadow: 0 0 10px rgba(43, 255, 116, .6); color: #04140a; }
-:root[data-theme="capri"] .group-head { background: linear-gradient(rgba(16, 16, 23, .92), transparent); }
-:root[data-theme="capri"] .bar { background: linear-gradient(180deg, #ff5f8f, #ff2e5c); box-shadow: 3px 0 0 rgba(139, 61, 255, .55); }
-:root[data-theme="capri"] .ring circle[stroke^="url"] { filter: drop-shadow(0 0 4px rgba(255, 46, 92, .6)); }
-:root[data-theme="capri"] ::selection { background: rgba(43, 255, 116, .3); }
+:root[data-theme="capri"] .sidebar.has-pill .nav-item.active { box-shadow: none; }
+:root[data-theme="capri"] .nav-item.active .ico { color: var(--accent); filter: drop-shadow(0 0 5px rgba(255, 46, 92, .8)); }
+:root[data-theme="capri"] .group-head {
+  text-transform: uppercase; letter-spacing: .07em; font-size: 13px;
+  background: var(--glass-strong); border-color: rgba(255, 46, 92, .3);
+  box-shadow: inset 3px 0 0 var(--accent), 0 4px 16px var(--glass-shade);
+}
+:root[data-theme="capri"] .group-head.overdue { box-shadow: inset 3px 0 0 var(--p1), 0 0 18px rgba(255, 71, 102, .15); }
+:root[data-theme="capri"] .group-head.deadline { box-shadow: inset 3px 0 0 var(--deadline), 0 4px 16px var(--glass-shade); }
+@media (hover: hover) {
+  :root[data-theme="capri"] .task:hover { box-shadow: inset 0 -1px 0 rgba(255, 46, 92, .45), 0 6px 18px var(--glass-shade); }
+}
+:root[data-theme="capri"] .task.selected {
+  border-color: rgba(57, 255, 136, .3);
+  box-shadow: inset 3px 0 0 var(--neon-green), 0 0 22px rgba(57, 255, 136, .12), 0 4px 16px var(--glass-shade);
+}
+:root[data-theme="capri"] .check.p1 { box-shadow: 0 0 9px rgba(255, 71, 102, .55); }
+:root[data-theme="capri"] .check.p2 { box-shadow: 0 0 9px rgba(255, 178, 31, .45); }
+:root[data-theme="capri"] .check.p3 { box-shadow: 0 0 9px rgba(123, 147, 255, .45); }
+:root[data-theme="capri"] .check.checked { box-shadow: 0 0 12px rgba(57, 255, 136, .7); color: #03140a; }
+:root[data-theme="capri"] .meta .due.today { box-shadow: 0 0 10px rgba(57, 255, 136, .18); }
+:root[data-theme="capri"] .meta .due.overdue { box-shadow: 0 0 10px rgba(255, 71, 102, .2); }
+:root[data-theme="capri"] .bar { background: linear-gradient(180deg, #ff6a95, #ff2e5c); box-shadow: 3px 0 0 rgba(154, 77, 255, .6), 0 0 12px rgba(255, 46, 92, .4); }
+:root[data-theme="capri"] .ring circle[stroke^="url"] { filter: drop-shadow(0 0 5px rgba(255, 46, 92, .7)); }
+:root[data-theme="capri"] .toast { border-color: rgba(255, 46, 92, .35); box-shadow: inset 3px 0 0 var(--accent), var(--shadow); }
+:root[data-theme="capri"] ::selection { background: rgba(57, 255, 136, .32); }
+:root[data-theme="capri"] ::-webkit-scrollbar-thumb { background-color: rgba(255, 46, 92, .3); }
 :root[data-theme="capri"] .dd-opt.on, :root[data-theme="capri"] .add-task-btn { color: var(--accent); }
+:root[data-theme="capri"] .timer-time { letter-spacing: .02em; text-shadow: 1.5px 0 rgba(154, 77, 255, .7); }
 
 /* ======================================================================
    Liquid motion + touch
@@ -860,5 +967,12 @@ html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -we
 .nav-pill.jump { animation: pill-stretch .42s var(--ease-out); }
 @keyframes pill-stretch { 35% { scale: .98 1.12; } }
 .sidebar.has-pill .nav-item.active { background: transparent; border-color: transparent; box-shadow: none; }
-:root[data-theme="capri"] .nav-pill { box-shadow: inset 3px 0 0 var(--accent), 0 2px 10px var(--glass-shade); }
-:root[data-theme="capri"] .sidebar.has-pill .nav-item.active { box-shadow: none; }
+
+/* ---- theme switching ---- */
+/* View transitions: the new theme is revealed by a growing circle (animated from JS). */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-new(root) { z-index: 1; }
+/* Fallback without view transitions: colours ease across instead of snapping. */
+.theme-fading, .theme-fading *, .theme-fading *::before, .theme-fading *::after {
+  transition: background-color .5s ease, color .5s ease, border-color .5s ease, box-shadow .5s ease, fill .5s ease, stroke .5s ease, opacity .5s ease !important;
+}
