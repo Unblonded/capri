@@ -169,6 +169,17 @@ function setPinned(on) {
   saveConfig({ pinned: on });
 }
 
+// Drops cached pages, scripts and styles so the latest from the server loads. Cookies stay,
+// so you remain signed in.
+async function clearCache() {
+  const ses = win.webContents.session;
+  await ses.clearCache();
+  await ses.clearStorageData({ storages: ['cachestorage', 'serviceworkers', 'shadercache'] });
+  showWindow();
+  openServer();
+  new Notification({ title: 'Capri', body: 'Cache cleared. Loaded the latest version.' }).show();
+}
+
 function buildTrayMenu() {
   const login = app.getLoginItemSettings();
   return Menu.buildFromTemplate([
@@ -190,6 +201,7 @@ function buildTrayMenu() {
     },
     { label: 'Change server…', click: () => { showWindow(); showSetup(); } },
     { label: 'Reload', click: openServer },
+    { label: 'Clear cache and reload', click: clearCache },
     { type: 'separator' },
     updateReady
       ? { label: `Restart to update to ${updateReady}`, click: () => { quitting = true; autoUpdater.quitAndInstall(); } }

@@ -61,6 +61,7 @@ On a **Windows** server the update also rebuilds the desktop app whenever its ve
 - **Ctrl+Shift+Space** from anywhere opens quick add
 - *Pin to desktop* (tray menu, off by default): Capri sits on the desktop layer like a widget, just above your wallpaper and under your other windows, so you can add and tick off tasks right on the desktop. It leaves the taskbar while pinned and stays visible after Win+D
 - *Always on top* toggle in the tray menu, and it remembers its window size and position
+- Tray → *Clear cache and reload* forces the latest version of the page to load (you stay signed in)
 - Updates itself from your Capri server (installer version only; the portable exe can't self-update). Tray → *Check for updates* checks now
 
 Build it on any machine with `npm install` then:
