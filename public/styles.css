@@ -1078,20 +1078,13 @@ img, svg { -webkit-user-drag: none; }
 @media (max-width: 760px) { .task-actions { display: none; } }
 
 /* ---- tap feedback ---- */
-/* A ripple from the press point plus a ring, on its own layer above the button (see app.js). */
-.tap-fx {
-  position: fixed; z-index: 9999; pointer-events: none; overflow: hidden;
-  animation: tap-ring .5s ease-out forwards;
-}
-.tap-fx i {
-  position: absolute; border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 42%, transparent) 0%, color-mix(in srgb, var(--accent) 18%, transparent) 55%, transparent 72%);
-  transform: scale(0); animation: tap-wave .55s cubic-bezier(.2, .8, .2, 1) forwards;
-}
-@keyframes tap-wave { 0% { transform: scale(0); opacity: 1; } 60% { opacity: .85; } 100% { transform: scale(1); opacity: 0; } }
-@keyframes tap-ring {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
-  100% { box-shadow: 0 0 0 9px transparent, inset 0 0 0 1px transparent; }
+/* Uses the separate `scale` property so it stacks with each control's own transforms (see app.js). */
+.tap-press { scale: .95; filter: brightness(1.12); transition: scale .1s ease-out, filter .1s ease-out; }
+.tap-release { animation: tap-release .38s cubic-bezier(.34, 1.56, .64, 1); }
+@keyframes tap-release {
+  0% { scale: .95; filter: brightness(1.12); }
+  55% { scale: 1.03; }
+  100% { scale: 1; filter: none; }
 }
 
 /* ---- phone sidebar backdrop ---- */
@@ -1120,6 +1113,6 @@ img, svg { -webkit-user-drag: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tap-fx, .tap-fx i, .busy, .task.resched-out, .task.resched-in { animation: none; }
-  .tap-fx { display: none; }
+  .tap-release, .busy, .task.resched-out, .task.resched-in { animation: none; }
+  .tap-press { scale: 1; }
 }

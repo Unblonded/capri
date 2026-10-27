@@ -2103,26 +2103,28 @@ async function rescheduleOverdue(btn) {
 
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// Tap feedback: every button flashes a ripple from where you pressed it. It's drawn on its own layer,
-// so it still plays when the click redraws the button underneath.
+// Tap feedback: a pressed button sinks slightly and brightens, then springs back when you let go.
 const TAPPABLE = 'button, .nav-item, .chip, .date-pill, .dd-btn, .dd-opt, [data-act], .ctx-item, a.btn';
+let pressed = null;
 document.addEventListener('pointerdown', (e) => {
   if (e.button > 0) return;
   const el = e.target.closest(TAPPABLE);
   if (!el || el.disabled || el.closest('canvas, .canvas-wrap')) return;
-  const r = el.getBoundingClientRect();
-  if (!r.width || !r.height) return;
-  const fx = document.createElement('span');
-  fx.className = 'tap-fx';
-  const cs = getComputedStyle(el);
-  Object.assign(fx.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px`, borderRadius: cs.borderRadius });
-  const size = Math.hypot(Math.max(e.clientX - r.left, r.right - e.clientX), Math.max(e.clientY - r.top, r.bottom - e.clientY)) * 2;
-  const wave = document.createElement('i');
-  Object.assign(wave.style, { width: `${size}px`, height: `${size}px`, left: `${e.clientX - r.left - size / 2}px`, top: `${e.clientY - r.top - size / 2}px` });
-  fx.appendChild(wave);
-  document.body.appendChild(fx);
-  setTimeout(() => fx.remove(), 650);
+  pressed = el;
+  el.classList.remove('tap-release');
+  el.classList.add('tap-press');
 }, { capture: true, passive: true });
+const releasePress = () => {
+  const el = pressed;
+  if (!el) return;
+  pressed = null;
+  el.classList.remove('tap-press');
+  void el.offsetWidth; // restart the animation on quick repeat taps
+  el.classList.add('tap-release');
+  el.addEventListener('animationend', () => el.classList.remove('tap-release'), { once: true });
+};
+document.addEventListener('pointerup', releasePress, true);
+document.addEventListener('pointercancel', releasePress, true);
 // iOS home-screen apps with a see-through status bar can lay the page out shorter than the screen,
 // leaving a black strip along the bottom. Measure the shortfall and let the CSS stretch over it.
 function fixStandaloneHeight() {
