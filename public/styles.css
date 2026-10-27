@@ -1028,3 +1028,48 @@ img, svg { -webkit-user-drag: none; }
 .ask-card .btn:focus-visible, .ctx-menu button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ask-card .btn:focus:not(:focus-visible) { outline: none; }
 .ctx-menu { overflow-y: auto; }
+
+/* ---- date fields + calendar (replaces the browser's date box) ---- */
+.date-field {
+  display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; min-width: 0;
+  padding: 7px 12px 7px 9px; border: 1px solid var(--glass-border); border-radius: 10px;
+  background: var(--glass-inset); color: var(--text); font-size: 13px; font-weight: 500; white-space: nowrap;
+  transition: border-color .15s, background .15s, transform .3s var(--spring);
+}
+.date-field span { overflow: hidden; text-overflow: ellipsis; }
+.date-field:hover { background: var(--hover); }
+.date-field:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.date-field.empty span { color: var(--muted); }
+.date-field .cal { width: 16px; height: 16px; flex-shrink: 0; }
+.date-field.wide { flex: 1; }
+.date-row { flex-wrap: wrap; }
+.date-row #d-due { flex: 1 1 160px; }
+/* In the quick-add pills the pill already has an icon, so the field is just text. */
+.date-field.bare { border: 0; background: none; padding: 3px 8px 3px 4px; font-size: 12.5px; }
+.date-field.bare .cal { display: none; }
+.date-field.bare.empty span, .date-field.bare.empty { color: var(--faint); }
+
+.date-pop { width: 272px; padding: 10px; }
+.dp-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 8px; }
+.dp-title { font-weight: 650; font-size: 13.5px; }
+.dp-head [data-dp-month="-1"] .ic { transform: rotate(90deg); }
+.dp-head [data-dp-month="1"] .ic { transform: rotate(-90deg); }
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dp-dow { text-align: center; font-size: 11px; font-weight: 600; color: var(--faint); padding: 2px 0 4px; }
+.dp-day {
+  aspect-ratio: 1; border: 1px solid transparent; background: none; border-radius: 9px; color: var(--text);
+  font-size: 12.5px; font-variant-numeric: tabular-nums; padding: 0;
+  transition: background .12s, transform .25s var(--spring);
+}
+.dp-day:hover { background: var(--hover); }
+.dp-day:active { transform: scale(.88); }
+.dp-day:focus-visible { outline: none; border-color: var(--accent); }
+.dp-day.out { color: var(--faint); }
+.dp-day.past:not(.on) { opacity: .55; }
+.dp-day.today { color: var(--accent); font-weight: 700; border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.dp-day.on { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--on-accent, #fff); font-weight: 700; box-shadow: 0 4px 12px var(--accent-soft); }
+.dp-foot { display: flex; gap: 6px; padding-top: 8px; margin-top: 6px; border-top: 1px solid var(--line); }
+:root[data-theme="capri"] .dp-day.on { box-shadow: 2px 2px 0 var(--violet), 0 0 14px rgba(255, 46, 92, .45); }
+:root[data-theme="capri"] .dp-title { font-family: var(--display); text-transform: uppercase; letter-spacing: .05em; }
+/* In the narrow layout the hover toolbar would sit on top of the task's title; right-click and swipes cover it. */
+@media (max-width: 760px) { .task-actions { display: none; } }

@@ -571,6 +571,124 @@ document.addEventListener('click', (e) => {
   if (Date.now() - swipeEndedAt < 400) { e.stopPropagation(); e.preventDefault(); }
 }, true);
 
+// ---------- date picker ----------
+// Our own calendar instead of the browser's date box (which looks different on every OS and saves
+// half-typed dates). A field is a hidden input holding YYYY-MM-DD plus a button showing it; picking a
+// day sets the input and fires 'change', so the usual change handlers do the rest.
+function dateField(id, value, placeholder, cls = '') {
+  return `<input type="hidden" id="${id}" value="${value || ''}" /><button type="button" class="date-field ${cls} ${value ? '' : 'empty'}" data-date-for="${id}" data-placeholder="${esc(placeholder)}">${calIcon(value || today())}<span>${value ? esc(dateFieldLabel(value)) : esc(placeholder)}</span></button>`;
+}
+function dateFieldLabel(day) {
+  const d = new Date(`${day}T00:00`);
+  const rel = dayLabel(day);
+  const full = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+  return /^(Today|Tomorrow|Yesterday)$/.test(rel) ? `${rel} · ${full}` : full;
+}
+function syncDateFields(root = document) {
+  $$('.date-field[data-date-for]', root).forEach((btn) => {
+    const v = document.getElementById(btn.dataset.dateFor)?.value;
+    btn.classList.toggle('empty', !v);
+    btn.innerHTML = `${calIcon(v || today())}<span>${esc(v ? dateFieldLabel(v) : btn.dataset.placeholder)}</span>`;
+  });
+}
+
+let datePop = null; // { el, id, view: Date (1st of the month shown) }
+function closeDatePicker() { datePop?.el.remove(); datePop = null; }
+
+function openDatePicker(btn) {
+  const id = btn.dataset.dateFor;
+  if (datePop?.id === id) return closeDatePicker();
+  closeDatePicker(); closeDropdown(); closeTaskMenu();
+  const value = document.getElementById(id)?.value;
+  const view = value ? new Date(`${value}T00:00`) : new Date();
+  view.setDate(1);
+  const el = document.createElement('div');
+  el.className = 'dd-menu date-pop';
+  el.setAttribute('role', 'dialog');
+  datePop = { el, id, view };
+  renderDatePicker();
+  document.body.appendChild(el);
+  const r = btn.getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight, gap = 8;
+  const below = r.bottom + 6 + h + gap <= innerHeight;
+  el.style.left = `${Math.max(gap, Math.min(r.left, innerWidth - w - gap))}px`;
+  el.style.top = `${below ? r.bottom + 6 : Math.max(gap, r.top - 6 - h)}px`;
+  el.style.transformOrigin = below ? 'top left' : 'bottom left';
+  ($('.dp-day.on', el) || $('.dp-day.today', el) || $('.dp-day', el))?.focus({ preventScroll: true });
+}
+
+function renderDatePicker() {
+  const { el, id, view } = datePop;
+  const value = document.getElementById(id)?.value || '';
+  const t = today();
+  const start = new Date(view);
+  start.setDate(1 - start.getDay()); // weeks start on Sunday
+  const days = Array.from({ length: 42 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
+  const names = days.slice(0, 7).map((d) => d.toLocaleDateString([], { weekday: 'narrow' }));
+  el.innerHTML = `
+    <div class="dp-head">
+      <button type="button" class="icon-btn sm" data-dp-month="-1" aria-label="Previous month">${ic('chevron')}</button>
+      <span class="dp-title">${esc(view.toLocaleDateString([], { month: 'long', year: 'numeric' }))}</span>
+      <button type="button" class="icon-btn sm" data-dp-month="1" aria-label="Next month">${ic('chevron')}</button>
+    </div>
+    <div class="dp-grid">
+      ${names.map((n) => `<span class="dp-dow">${esc(n)}</span>`).join('')}
+      ${days.map((d) => {
+        const k = ymd(d);
+        const cls = [d.getMonth() !== view.getMonth() && 'out', k === t && 'today', k === value && 'on', k < t && 'past'].filter(Boolean).join(' ');
+        return `<button type="button" class="dp-day ${cls}" data-dp-day="${k}" tabindex="-1">${d.getDate()}</button>`;
+      }).join('')}
+    </div>
+    <div class="dp-foot">
+      <button type="button" class="qchip" data-dp-day="${t}">Today</button>
+      <button type="button" class="qchip" data-dp-day="${ymd(new Date(Date.now() + 864e5))}">Tomorrow</button>
+      ${value ? '<button type="button" class="qchip" data-dp-day="">Clear</button>' : ''}
+    </div>`;
+}
+
+function pickDate(day) {
+  const input = document.getElementById(datePop.id); // looked up fresh: a redraw may have replaced it
+  closeDatePicker();
+  // Hand focus back: to the title in quick add (so Enter saves), otherwise to the date button.
+  (input?.closest('#quick') ? $('#quick-input') : $(`[data-date-for="${input?.id}"]`))?.focus({ preventScroll: true });
+  if (!input || input.value === day) return;
+  input.value = day;
+  syncDateFields(input.parentElement || document);
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+document.addEventListener('click', (e) => {
+  const field = e.target.closest('.date-field[data-date-for]');
+  if (field) { e.preventDefault(); return openDatePicker(field); }
+  if (!datePop || !datePop.el.contains(e.target)) return;
+  e.stopPropagation();
+  const m = e.target.closest('[data-dp-month]');
+  if (m) { datePop.view.setMonth(datePop.view.getMonth() + Number(m.dataset.dpMonth)); renderDatePicker(); return; }
+  const d = e.target.closest('[data-dp-day]');
+  if (d) pickDate(d.dataset.dpDay);
+}, true);
+document.addEventListener('pointerdown', (e) => {
+  if (datePop && !datePop.el.contains(e.target) && !e.target.closest(`[data-date-for="${datePop.id}"]`)) closeDatePicker();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (!datePop) return;
+  e.stopPropagation();
+  if (e.key === 'Escape') { e.preventDefault(); const id = datePop.id; closeDatePicker(); $(`[data-date-for="${id}"]`)?.focus(); return; }
+  const cur = document.activeElement?.dataset?.dpDay;
+  const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
+  if (step && cur) {
+    e.preventDefault();
+    const d = new Date(`${cur}T00:00`); d.setDate(d.getDate() + step);
+    const k = ymd(d);
+    if (d.getMonth() !== datePop.view.getMonth() || d.getFullYear() !== datePop.view.getFullYear()) {
+      datePop.view = new Date(d.getFullYear(), d.getMonth(), 1); renderDatePicker();
+    }
+    $(`.dp-day[data-dp-day="${k}"]`, datePop.el)?.focus();
+  } else if ((e.key === 'Enter' || e.key === ' ') && cur) { e.preventDefault(); pickDate(cur); }
+}, true);
+addEventListener('resize', closeDatePicker);
+document.addEventListener('scroll', (e) => { if (datePop && !datePop.el.contains(e.target)) closeDatePicker(); }, true);
+
 // ---------- task right-click menu ----------
 let ctxMenu = null;
 function closeTaskMenu() { ctxMenu?.remove(); ctxMenu = null; }
@@ -1173,7 +1291,7 @@ function renderDetail() {
       <div class="bh">${calIcon(day || today())} Do date <span class="countdown">${day ? esc(dayLabel(day)) + (dueTime(t) ? ' · ' + esc(dueTime(t)) : '') : 'not scheduled'}</span></div>
       <div class="date-row">
         <input id="d-due" placeholder="tomorrow 5pm, every mon…" value="${esc(t.due?.string || '')}" />
-        <input id="d-due-date" type="date" value="${day || ''}" title="Pick a date" />
+        ${dateField('d-due-date', day, 'Pick date')}
       </div>
       <div class="quick-chips">${dueChips.map(([l, v]) => `<button class="qchip" data-due-set="${v}">${l}</button>`).join('')}</div>
     </div>
@@ -1181,7 +1299,7 @@ function renderDetail() {
     <div class="date-block deadline-block glass-inset">
       <div class="bh">${ic('flag')} Deadline <span class="countdown">${dl ? `<span class="dl ${dlClass(dl)}">${esc(countdown(dl))}</span>` : 'none'}</span></div>
       <div class="date-row">
-        <input id="d-deadline" type="date" value="${dl || ''}" style="flex:1" />
+        ${dateField('d-deadline', dl, 'Pick a deadline', 'wide')}
         ${dl ? '<button class="qchip" data-deadline-set="">Clear</button>' : ''}
       </div>
       <div class="quick-chips">${dlChips.map(([l, v]) => `<button class="qchip" data-deadline-set="${v}">${l}</button>`).join('')}</div>
@@ -1240,8 +1358,10 @@ function openDetail(id, focusSel) {
   $$(`[data-task="${id}"]`).forEach((e) => e.classList.add('selected'));
   if (focusSel) {
     const input = $(focusSel);
-    input?.focus();
-    try { input?.showPicker?.(); } catch { /* not all browsers allow it */ }
+    // Date fields open our calendar; anything else just gets focus.
+    const picker = input?.type === 'hidden' && $(`[data-date-for="${input.id}"]`);
+    if (picker) requestAnimationFrame(() => openDatePicker(picker));
+    else input?.focus();
   }
 }
 
@@ -1418,6 +1538,7 @@ function openQuick(ctx = null) {
   $('#quick-desc').value = '';
   $('#quick-due').value = ctx?.due || '';
   $('#quick-deadline').value = ctx?.deadline || '';
+  syncDateFields($('#quick'));
   state.quickIgnore = null;
   const p = ctx?.project_id && projectById(ctx.project_id);
   input.placeholder = ctx?.parent_id ? 'Sub-task name…'
@@ -2163,7 +2284,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   if (e.target.id === 'sort-select') { state.sort = e.target.value; store.set('sort', state.sort); return renderView(); }
   if (e.target.id === 'bulk-prio') { const v = Number(e.target.value); e.target.value = ''; return v && runBulk('priority', v); }
-  if (e.target.id === 'quick-due' || e.target.id === 'quick-deadline') return updateQuickPreview();
+  if (e.target.id === 'quick-due' || e.target.id === 'quick-deadline') { syncDateFields($('#quick')); return updateQuickPreview(); }
   const id = state.detailId;
   if (!id) return;
   if (e.target.id === 'd-content' && e.target.value.trim()) updateTask(id, { content: e.target.value.trim() });
@@ -2341,7 +2462,7 @@ async function autoSync(minGap = AUTO_SYNC_MS) {
   if (autoSyncing || document.hidden || $('#app').classList.contains('hidden')) return;
   if (Date.now() - state.lastSync < minGap) return;
   // Not mid-gesture or mid-drag, and not while your own changes are still saving.
-  if (swipe || $('.task.dragging') || writes.pending || ddOpen) return;
+  if (swipe || $('.task.dragging') || writes.pending || ddOpen || datePop || ctxMenu) return;
   const a = document.activeElement;
   if (a?.matches('input, textarea') && !$('#detail').contains(a)) return; // typing somewhere a redraw would clear
   autoSyncing = true;

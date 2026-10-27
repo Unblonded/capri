@@ -116,8 +116,8 @@
       </div>
       <textarea id="quick-desc" placeholder="Description" rows="2"></textarea>
       <div class="quick-dates">
-        <label class="date-pill" title="When you plan to do it"><span><i data-ic="calendar"></i> Do date</span><input type="date" id="quick-due" /></label>
-        <label class="date-pill deadline" title="When it absolutely has to be done"><span><i data-ic="flag"></i> Deadline</span><input type="date" id="quick-deadline" /></label>
+        <div class="date-pill" title="When you plan to do it"><span><i data-ic="calendar"></i> Do date</span><input type="hidden" id="quick-due" /><button type="button" class="date-field bare empty" data-date-for="quick-due" data-placeholder="Pick">Pick</button></div>
+        <div class="date-pill deadline" title="When it absolutely has to be done"><span><i data-ic="flag"></i> Deadline</span><input type="hidden" id="quick-deadline" /><button type="button" class="date-field bare empty" data-date-for="quick-deadline" data-placeholder="Pick">Pick</button></div>
       </div>
       <div id="quick-preview" class="quick-preview"></div>
       <div class="quick-foot">
