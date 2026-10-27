@@ -17,6 +17,7 @@
   --accent-2: #d7a443;
   --accent-soft: rgba(184, 132, 30, 0.15);
   --on-accent: #1c1606;
+  --menu-bg: #f7f4ee;
   --night: linear-gradient(135deg, #1f2a52, #0a0f22);
   --p1: #e5383b;
   --p2: #f08a00;
@@ -48,6 +49,7 @@
   --accent: #e6b85c;
   --accent-2: #f6dc96;
   --accent-soft: rgba(230, 184, 92, 0.17);
+  --menu-bg: #161b33;
   --p1: #ff6b6b;
   --p2: #ffa632;
   --p3: #6b9bff;
@@ -156,6 +158,10 @@ kbd {
 .btn.wide { width: 100%; }
 .btn:disabled { opacity: 0.5; cursor: default; }
 select.btn { appearance: none; padding-right: 14px; cursor: pointer; }
+/* Native dropdown lists can't be see-through, so give them a solid themed background
+   (otherwise Windows shows light text on a white list in dark mode). */
+select { color-scheme: inherit; }
+select option, select optgroup { background-color: var(--menu-bg); color: var(--text); }
 .icon-btn {
   border: 0; background: transparent; border-radius: 10px; width: 32px; height: 32px; flex-shrink: 0;
   display: grid; place-items: center; color: var(--muted); font-size: 15px; text-decoration: none; transition: background .15s;

@@ -31,6 +31,24 @@ Run the server on the computer that stays on, and put your domain in front of it
 
 Use HTTPS on the domain so the token cookie is always encrypted in transit. If your proxy isn't on the same machine or private network, set `TRUST_PROXY` to its address so HTTPS is detected correctly.
 
+## Updating the server PC
+
+One-time setup on the server PC:
+
+```bash
+git clone https://github.com/Unblonded/tasks.git capri
+cd capri
+npm install --omit=dev
+npm run serve
+```
+
+`npm run serve` restarts Capri by itself whenever its server code changes, so updating is just pulling the latest code. Either:
+
+- **Double-click `update.bat`** (Windows) or run `./update.sh` (Mac/Linux), or
+- run `npm run update` in the Capri folder.
+
+That pulls from GitHub and installs any new packages. Page changes show up on the next refresh, and server changes restart automatically. `--omit=dev` skips Electron, which the server doesn't need.
+
 ## Windows desktop app
 
 `desktop/` is a small Electron shell that opens your Capri server as a desktop app:
