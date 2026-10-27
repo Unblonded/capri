@@ -2217,15 +2217,15 @@ function showConnect() {
 
 // Offline cache: the app opens from this device's copy and refreshes it in the background.
 // When a newer version has been downloaded, offer to switch to it.
+let updateReady = false;
 if ('serviceWorker' in navigator && isSecureContext) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
   navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data !== 'capri-updated') return;
-    // Nothing open or being typed: just switch to the new version. Otherwise let you finish first.
-    const busy = !$('#detail').classList.contains('hidden') || $$('.modal:not(.hidden)').length
-      || /INPUT|TEXTAREA/.test(document.activeElement?.tagName) || pendingDeletes.size || writes.pending;
-    if (!busy) { toast('Updating Capri…'); setTimeout(() => location.reload(), 600); }
-    else toast('Capri has been updated', { label: 'Reload', run: () => location.reload() });
+    if (e.data !== 'capri-updated' || updateReady) return;
+    // The new version is already saved on the device. Switch to it quietly the next time Capri goes
+    // to the background, so it never reloads in your face; or right now from the toast.
+    updateReady = true;
+    toast('Capri has been updated', { label: 'Reload', run: () => location.reload() });
   });
   // A home-screen app is usually resumed rather than reloaded, so the cache would never look for a new
   // version. Each time Capri comes back to the front (at most once a minute), and every 10 minutes while
@@ -2237,7 +2237,10 @@ if ('serviceWorker' in navigator && isSecureContext) {
     navigator.serviceWorker.getRegistration().then((r) => r?.update()).catch(() => {});
     for (const f of ['/', '/app.js', '/styles.css']) fetch(f).catch(() => {});
   };
-  document.addEventListener('visibilitychange', checkForUpdate);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && updateReady && !writes.pending && !pendingDeletes.size) location.reload();
+    else checkForUpdate();
+  });
   addEventListener('focus', checkForUpdate);
   setInterval(checkForUpdate, 10 * 60000);
 }

@@ -1,7 +1,7 @@
 // Capri's offline cache. The app itself (page, script, styles, icons, fonts) is served from the cache
 // straight away and refreshed in the background, so the home-screen app opens instantly. Your tasks
 // come from the network when it answers quickly, otherwise from the last copy saved on this device.
-const SHELL = 'capri-shell-v1';
+const SHELL = 'capri-shell-v2';
 const FONTS = 'capri-fonts-v1';
 const DATA = 'capri-data-v1';
 const SHELL_FILES = ['/', '/app.js', '/styles.css', '/manifest.webmanifest', '/icons/apple-touch-icon.png', '/icons/icon-192.png'];
@@ -10,7 +10,8 @@ const DATA_PATHS = ['/api/status', '/api/bootstrap', '/api/drawings'];
 const NETWORK_WAIT = 3500;
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the browser's own HTTP cache, which Cloudflare tells to keep files for hours.
+  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES.map((f) => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -51,12 +52,15 @@ async function cacheFirst(req) {
 async function staleWhileRevalidate(e, key) {
   const cache = await caches.open(SHELL);
   const hit = await cache.match(key);
+  // Read the saved copy now: once it's handed to the page its body can't be cloned any more.
+  const saved = hit ? hit.clone().text() : Promise.resolve(null);
   const fresh = fetch(key, { cache: 'no-cache' }).then(async (res) => {
     if (!res.ok) return res;
+    // Compare the files themselves: proxies like Cloudflare can change ETags without the file changing.
+    const [before, after] = await Promise.all([saved, res.clone().text()]);
+    if (before === after) return res;
     await cache.put(key, res.clone());
-    const before = hit?.headers.get('etag');
-    const after = res.headers.get('etag');
-    if (hit && before && after && before !== after) notifyUpdated();
+    if (hit) notifyUpdated();
     return res;
   });
   if (!hit) return fresh;
