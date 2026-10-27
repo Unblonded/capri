@@ -132,7 +132,10 @@ async function sync({ quiet = false, auto = false } = {}) {
     data.tasks = data.tasks.filter((x) => !pendingDeletes.has(x.id) && !pendingDeletes.has(x.parent_id));
     Object.assign(state, data, { drawings, lastSync: Date.now() });
     loadDoneToday();
+    const before = taskRowsOnScreen();
     render();
+    // First load and a tap on Sync flow the whole list in; background syncs only move what changed.
+    animateSync(before, { full: !quiet || !before.size });
     if (!quiet) toast('Synced with Todoist');
   } catch (err) {
     if (!quiet) toast(err.message);
@@ -827,6 +830,59 @@ function animateViewIn() {
   main.classList.add('view-enter');
   clearTimeout(viewEnterTimer);
   viewEnterTimer = setTimeout(() => main.classList.remove('view-enter'), 1000);
+}
+
+// Where every task row sits right now, so a sync can animate from there to the new layout.
+function taskRowsOnScreen() {
+  const rows = new Map();
+  for (const el of $$('.task[data-task]', $('#view'))) {
+    rows.set(el.dataset.task, { el, rect: el.getBoundingClientRect(), html: el.innerHTML });
+  }
+  return rows;
+}
+
+const SYNC_EASE = 'cubic-bezier(.2, .8, .2, 1)';
+function animateSync(before, { full }) {
+  if (reducedMotion()) return;
+  if (full) return animateViewIn();
+  let arriving = 0;
+  for (const el of $$('.task[data-task]', $('#view'))) {
+    const old = before.get(el.dataset.task);
+    if (!old) {
+      // New from Todoist: rises in, a few at a time.
+      el.animate(
+        [{ opacity: 0, transform: 'translateY(12px) scale(.985)', filter: 'blur(5px)' }, { opacity: 1, transform: 'none', filter: 'none' }],
+        { duration: 550, delay: Math.min(arriving++, 8) * 45, easing: SYNC_EASE, fill: 'backwards' },
+      );
+      continue;
+    }
+    const rect = el.getBoundingClientRect();
+    const dx = old.rect.left - rect.left;
+    const dy = old.rect.top - rect.top;
+    // Moved (another task came or went above it): glide from the old spot instead of jumping.
+    if (old.rect.height && rect.height && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
+      el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 480, easing: SYNC_EASE });
+    }
+    // Edited elsewhere: the new text fades in.
+    if (old.html !== el.innerHTML) {
+      el.animate([{ opacity: 0.35, filter: 'blur(2px)' }, { opacity: 1, filter: 'none' }], { duration: 420, easing: 'ease-out' });
+    }
+  }
+  // Gone from Todoist: a copy of the old row slides away where it used to be.
+  const current = new Set($$('.task[data-task]', $('#view')).map((el) => el.dataset.task));
+  for (const [id, { el, rect }] of before) {
+    if (current.has(id) || !rect.height || rect.bottom < 0 || rect.top > innerHeight) continue;
+    Object.assign(el.style, {
+      position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`,
+      margin: '0', pointerEvents: 'none', zIndex: '5', boxSizing: 'border-box',
+    });
+    el.classList.remove('selected', 'picked', 'lit');
+    document.body.append(el);
+    el.animate(
+      [{ opacity: 1, transform: 'none', filter: 'none' }, { opacity: 0, transform: 'translateX(28px) scale(.97)', filter: 'blur(3px)' }],
+      { duration: 380, easing: 'cubic-bezier(.5, 0, .75, 0)', fill: 'forwards' },
+    ).finished.then(() => el.remove(), () => el.remove());
+  }
 }
 
 // ---------- rendering ----------
