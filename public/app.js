@@ -135,7 +135,7 @@ async function sync({ quiet = false, auto = false } = {}) {
     const before = taskRowsOnScreen();
     render();
     // First load and a tap on Sync flow the whole list in; background syncs only move what changed.
-    animateSync(before, { full: !quiet || !before.size });
+    animateSync(before, { full: !quiet || !before.size, edits: true });
     if (!quiet) toast('Synced with Todoist');
   } catch (err) {
     if (!quiet) toast(err.message);
@@ -860,18 +860,28 @@ function taskRowsOnScreen() {
 }
 
 const SYNC_EASE = 'cubic-bezier(.2, .8, .2, 1)';
-function animateSync(before, { full }) {
+const arriveGlow = () => getComputedStyle(document.documentElement).getPropertyValue('--accent-soft').trim() || 'rgba(255, 255, 255, .12)';
+
+// render(), but tasks that appear glide in and the rest slide to their new spots instead of jumping.
+function renderAnimated() {
+  const before = taskRowsOnScreen();
+  render();
+  animateSync(before);
+}
+function animateSync(before, { full = false, edits = false } = {}) {
   if (reducedMotion()) return;
   if (full) return animateViewIn();
   let arriving = 0;
   for (const el of $$('.task[data-task]', $('#view'))) {
     const old = before.get(el.dataset.task);
     if (!old) {
-      // New from Todoist: rises in, a few at a time.
+      // New (or back from undo): rises in with a soft glow, a few at a time.
+      const delay = Math.min(arriving++, 8) * 45;
       el.animate(
-        [{ opacity: 0, transform: 'translateY(12px) scale(.985)', filter: 'blur(5px)' }, { opacity: 1, transform: 'none', filter: 'none' }],
-        { duration: 550, delay: Math.min(arriving++, 8) * 45, easing: SYNC_EASE, fill: 'backwards' },
+        [{ opacity: 0, transform: 'translateY(10px) scale(.97)', filter: 'blur(5px)' }, { opacity: 1, transform: 'none', filter: 'none' }],
+        { duration: 560, delay, easing: SYNC_EASE, fill: 'backwards' },
       );
+      el.animate([{ backgroundColor: arriveGlow() }, { backgroundColor: 'transparent' }], { duration: 1100, delay: delay + 180, easing: 'ease-out', fill: 'backwards' });
       continue;
     }
     const rect = el.getBoundingClientRect();
@@ -882,7 +892,7 @@ function animateSync(before, { full }) {
       el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 480, easing: SYNC_EASE });
     }
     // Edited elsewhere: the new text fades in.
-    if (old.html !== el.innerHTML) {
+    if (edits && old.html !== el.innerHTML) {
       el.animate([{ opacity: 0.35, filter: 'blur(2px)' }, { opacity: 1, filter: 'none' }], { duration: 420, easing: 'ease-out' });
     }
   }
@@ -890,6 +900,7 @@ function animateSync(before, { full }) {
   const current = new Set($$('.task[data-task]', $('#view')).map((el) => el.dataset.task));
   for (const [id, { el, rect }] of before) {
     if (current.has(id) || !rect.height || rect.bottom < 0 || rect.top > innerHeight) continue;
+    if (el.matches('.done-anim, .swipe-gone, .resched-out')) continue;
     Object.assign(el.style, {
       position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`,
       margin: '0', pointerEvents: 'none', zIndex: '5', boxSizing: 'border-box',
@@ -1462,7 +1473,7 @@ async function updateTask(id, body, { rerender = true } = {}) {
   try {
     const updated = await api('POST', `/api/tasks/${id}`, body);
     patchLocal(id, updated);
-    if (rerender) render();
+    if (rerender) renderAnimated();
     return updated;
   } catch (err) { toast(err.message); }
 }
@@ -1527,7 +1538,7 @@ async function completeTask(id, { quiet = false } = {}) {
   }
   if (state.doneToday != null) state.doneToday++;
   state.picked.delete(id);
-  render();
+  renderAnimated();
   try {
     await api('POST', `/api/tasks/${id}/close`);
     if (recurring) { await sync({ quiet: true }); if (!quiet) toast('Recurring task rescheduled'); }
@@ -1535,7 +1546,7 @@ async function completeTask(id, { quiet = false } = {}) {
   } catch (err) {
     t.checked = false;
     if (state.doneToday) state.doneToday--;
-    render();
+    renderAnimated();
     toast(err.message);
   }
 }
@@ -1544,7 +1555,7 @@ async function reopenTask(id) {
   try {
     await api('POST', `/api/tasks/${id}/reopen`);
     const t = taskById(id);
-    if (t) { t.checked = false; if (state.doneToday) state.doneToday--; render(); }
+    if (t) { t.checked = false; if (state.doneToday) state.doneToday--; renderAnimated(); }
     else await sync({ quiet: true });
     if (state.view.type === 'completed') loadCompleted();
     toast('Task reopened');
@@ -1558,7 +1569,7 @@ async function deleteTask(id) {
     await api('DELETE', `/api/tasks/${id}`);
     state.tasks = state.tasks.filter((x) => x.id !== id && x.parent_id !== id);
     closeDetail();
-    render();
+    renderAnimated();
     toast('Task deleted');
   } catch (err) { toast(err.message); }
 }
@@ -1571,16 +1582,16 @@ function deleteTaskSoon(id) {
   state.tasks = state.tasks.filter((x) => !removed.includes(x));
   state.picked.delete(id);
   if (state.detailId === id) closeDetail();
-  render();
+  renderAnimated();
   const commit = () => {
     if (!pendingDeletes.delete(id)) return;
-    api('DELETE', `/api/tasks/${id}`).catch((err) => { state.tasks.push(...removed); render(); toast(err.message); });
+    api('DELETE', `/api/tasks/${id}`).catch((err) => { state.tasks.push(...removed); renderAnimated(); toast(err.message); });
   };
   pendingDeletes.set(id, commit);
   setTimeout(commit, 6000);
   toast('Task deleted', {
     label: 'Undo',
-    run: () => { if (pendingDeletes.delete(id)) { state.tasks.push(...removed); render(); } },
+    run: () => { if (pendingDeletes.delete(id)) { state.tasks.push(...removed); renderAnimated(); } },
   });
 }
 // Closing the app mid-undo still deletes; keepalive lets the request outlive the page.
@@ -1600,7 +1611,7 @@ async function duplicateTask(id) {
     };
     const copy = await api('POST', '/api/tasks', body);
     state.tasks.push(copy);
-    render();
+    renderAnimated();
     openDetail(copy.id);
     toast('Task duplicated');
   } catch (err) { toast(err.message); }
@@ -1608,7 +1619,7 @@ async function duplicateTask(id) {
 
 async function setPriority(id, priority) {
   patchLocal(id, { priority });
-  render();
+  renderAnimated();
   await updateTask(id, { priority });
 }
 
@@ -1720,7 +1731,7 @@ async function saveQuick() {
       }
     }
     state.tasks.push(task);
-    render();
+    renderAnimated();
     $('#quick-input').value = '';
     $('#quick-desc').value = '';
     state.quickIgnore = null;
