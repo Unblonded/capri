@@ -13,6 +13,7 @@
     "dist:win": "electron-builder --win nsis portable --x64",
     "update": "node scripts/update.mjs",
     "serve": "node --watch server.js",
+    "serve:auto": "node scripts/autoserve.mjs",
     "build:desktop": "electron-builder --win nsis --publish never",
     "dist:mac": "electron-builder --mac --publish never"
   },

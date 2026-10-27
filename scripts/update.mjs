@@ -11,7 +11,12 @@ const run = (cmd) => execSync(cmd, { cwd: root, stdio: 'inherit', env: { ...proc
 
 // npm install rewrites package-lock.json on the server, and any edited tracked file blocks the pull.
 // Set those changes aside (recoverable with `git stash list` / `git stash pop`) rather than failing.
-const changed = execSync('git status --porcelain --untracked-files=no', { cwd: root, encoding: 'utf8' }).trim();
+let changed = execSync('git status --porcelain --untracked-files=no', { cwd: root, encoding: 'utf8' }).trim();
+// The lockfile alone is just npm's rewrite: drop it instead of piling up a stash on every update.
+if (/^M{1,2}\s+package-lock\.json$/.test(changed)) {
+  run('git checkout -- package-lock.json');
+  changed = '';
+}
 if (changed) {
   console.log(`Setting aside local changes so the update can apply:\n${changed}\n`);
   run('git stash push -m "capri-update: local changes before update"');

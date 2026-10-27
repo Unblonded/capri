@@ -42,6 +42,14 @@ npm install --omit=dev
 npm run serve
 ```
 
+### Auto-update (recommended)
+
+Instead of `npm run serve`, double-click **`start-server.bat`** (or run `./start-server.sh` on Mac/Linux). It runs Capri and checks GitHub every minute. When there's a new commit it pulls it, installs packages, rebuilds the desktop app if its version changed, and restarts the server, so every push to `main` goes live by itself within a minute or two. The old server keeps serving while the update installs, and Capri restarts by itself if it ever crashes.
+
+To start it when Windows starts: press Win+R, type `shell:startup`, and put a shortcut to `start-server.bat` in that folder. Set `CAPRI_UPDATE_EVERY` (seconds) to change how often it checks.
+
+### Updating by hand
+
 `npm run serve` restarts Capri by itself whenever its server code changes, so updating is just pulling the latest code. Either:
 
 - **Double-click `update.bat`** (Windows) or run `./update.sh` (Mac/Linux), or
