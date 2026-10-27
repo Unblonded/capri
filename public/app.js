@@ -856,7 +856,18 @@ function taskRowsOnScreen() {
   for (const el of $$('.task[data-task]', $('#view'))) {
     rows.set(el.dataset.task, { el, rect: el.getBoundingClientRect(), html: el.innerHTML });
   }
+  rows.movers = moversOnScreen();
   return rows;
+}
+// The "Add task" rows and group headings move with the tasks; without this they'd jump ahead and
+// overlap the rows still gliding into place.
+function moversOnScreen() {
+  const out = new Map();
+  for (const el of $$('.inline-add, .group-head', $('#view'))) {
+    const key = el.matches('.inline-add') ? `add:${el.dataset.ctx}` : `head:${$('[data-collapse]', el)?.dataset.collapse || el.textContent}`;
+    if (!out.has(key)) out.set(key, { el, rect: el.getBoundingClientRect() });
+  }
+  return out;
 }
 
 const SYNC_EASE = 'cubic-bezier(.2, .8, .2, 1)';
@@ -894,6 +905,16 @@ function animateSync(before, { full = false, edits = false } = {}) {
     // Edited elsewhere: the new text fades in.
     if (edits && old.html !== el.innerHTML) {
       el.animate([{ opacity: 0.35, filter: 'blur(2px)' }, { opacity: 1, filter: 'none' }], { duration: 420, easing: 'ease-out' });
+    }
+  }
+  const now = moversOnScreen();
+  for (const [key, old] of before.movers || []) {
+    const cur = now.get(key);
+    if (!cur || !old.rect.height || !cur.rect.height) continue;
+    const dx = old.rect.left - cur.rect.left;
+    const dy = old.rect.top - cur.rect.top;
+    if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+      cur.el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 480, easing: SYNC_EASE });
     }
   }
   // Gone from Todoist: a copy of the old row slides away where it used to be.
