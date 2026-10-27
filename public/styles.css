@@ -127,11 +127,11 @@ kbd {
 .connect { position: relative; z-index: 1; min-height: 100%; display: grid; place-items: center; padding: 16px; }
 .connect-card { width: 100%; max-width: 410px; padding: 34px; text-align: center; border-radius: 28px; }
 .connect-card form { display: grid; gap: 10px; margin-top: 12px; }
-.connect-card input, .field input, .field select, .comment-form input {
+.connect-card input, .ask-card input, .field input, .field select, .comment-form input {
   padding: 10px 12px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-inset); outline: none;
   transition: border-color .15s, box-shadow .15s;
 }
-.connect-card input:focus, .field input:focus, .field select:focus, .comment-form input:focus {
+.connect-card input:focus, .ask-card input:focus, .field input:focus, .field select:focus, .comment-form input:focus {
   border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .hint { font-size: 12px; color: var(--muted); margin-top: 16px; }
@@ -417,6 +417,10 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 @keyframes fade { from { opacity: 0; } }
 .modal-card { width: 100%; max-width: 640px; overflow: hidden; border-radius: 26px; background: var(--glass-strong); animation: rise .2s ease; }
 @keyframes rise { from { transform: translateY(10px) scale(.98); opacity: 0; } }
+.ask-card { max-width: 400px; padding: 18px; display: grid; gap: 12px; }
+.ask-card h3 { margin: 0; font-size: 16px; }
+.ask-card input { width: 100%; }
+.ask-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .quick-card { padding: 16px 18px; display: grid; gap: 8px; }
 .quick-card input, .quick-card textarea { border: 0; background: none; outline: none; resize: none; }
 .qi-wrap { position: relative; }

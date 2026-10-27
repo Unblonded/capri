@@ -1591,21 +1591,42 @@ async function deleteDrawing() {
 
 // ---------- misc actions ----------
 
+// Electron (the desktop app) doesn't support window.prompt, so ask with our own dialog.
+function askText(title, { placeholder = '', ok = 'Create' } = {}) {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal ask-modal';
+    modal.innerHTML = `<form class="modal-card glass ask-card">
+      <h3>${esc(title)}</h3>
+      <input type="text" placeholder="${esc(placeholder)}" autocomplete="off" />
+      <div class="ask-actions"><button type="button" class="btn" data-ask-cancel>Cancel</button><button class="btn primary">${esc(ok)}</button></div>
+    </form>`;
+    const input = modal.querySelector('input');
+    const done = (value) => { modal.remove(); resolve(value); };
+    modal.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); if (input.value.trim()) done(input.value.trim()); });
+    modal.querySelector('[data-ask-cancel]').addEventListener('click', () => done(null));
+    modal.addEventListener('click', (e) => { if (e.target === modal) done(null); });
+    modal.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') done(null); });
+    document.body.appendChild(modal);
+    input.focus();
+  });
+}
+
 async function createProject() {
-  const name = prompt('Project name');
-  if (!name?.trim()) return;
+  const name = await askText('New project', { placeholder: 'e.g. Work' });
+  if (!name) return;
   try {
-    const p = await api('POST', '/api/projects', { name: name.trim() });
+    const p = await api('POST', '/api/projects', { name });
     state.projects.push(p);
     setView({ type: 'project', id: p.id });
   } catch (err) { toast(err.message); }
 }
 
 async function createSection() {
-  const name = prompt('Section name');
-  if (!name?.trim()) return;
+  const name = await askText('New section', { placeholder: 'e.g. Next up' });
+  if (!name) return;
   try {
-    const s = await api('POST', '/api/sections', { name: name.trim(), project_id: state.view.id });
+    const s = await api('POST', '/api/sections', { name, project_id: state.view.id });
     state.sections.push(s);
     render();
   } catch (err) { toast(err.message); }
