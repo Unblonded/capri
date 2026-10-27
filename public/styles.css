@@ -507,6 +507,20 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
   .help-grid kbd { display: inline; }
 }
 
+/* Home-screen app on a phone: keep clear of the notch/status bar and the home bar.
+   env() is 0 everywhere else, so desktop and normal browser tabs are unchanged. */
+.app { height: 100dvh; }
+@media (max-width: 760px) {
+  .app {
+    padding: calc(8px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-right))
+      calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
+  }
+  .sidebar { top: calc(8px + env(safe-area-inset-top)); bottom: calc(8px + env(safe-area-inset-bottom)); left: calc(8px + env(safe-area-inset-left)); }
+  .detail { top: calc(8px + env(safe-area-inset-top)); bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .modal { padding-top: calc(8vh + env(safe-area-inset-top)); }
+  .bulk, .toasts { bottom: calc(16px + env(safe-area-inset-bottom)); }
+}
+
 /* ---------- icons ---------- */
 .ic { width: 1.15em; height: 1.15em; flex-shrink: 0; vertical-align: -0.2em; display: inline-block; }
 .icon-btn .ic { width: 17px; height: 17px; }

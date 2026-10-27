@@ -70,6 +70,12 @@ npm run dist:win
 
 This produces `dist/Capri-Setup-<version>.exe` (installer) and `dist/Capri-Portable-<version>.exe` (no install). The builds aren't code-signed, so Windows SmartScreen will warn the first time: click *More info → Run anyway*. Run `npm run desktop` to try the app locally, or `npm run icons` after changing the logo.
 
+## Phone app (iPhone / Android)
+
+No App Store or developer account needed. Open your Capri address (e.g. https://capri.kalculator.lol) in **Safari** → Share → **Add to Home Screen**. The ♑ icon then opens Capri full screen in its own window, stays signed in, and picks up server updates automatically. On Android, use Chrome → menu → *Add to Home screen* / *Install app*.
+
+(A Shortcuts *Open URLs* action always opens a Safari tab with the browser bars, so use the home-screen icon for full screen.)
+
 ## Features
 
 - **Views:** Dashboard, Inbox, Today (with overdue + one-click "reschedule to today"), Upcoming (14 days), Focus (all P1/P2), Completed (last 7 days, with reopen), projects, labels, search
