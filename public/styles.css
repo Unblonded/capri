@@ -719,15 +719,22 @@ select[data-dd] { display: none !important; } /* .btn styles would otherwise ove
   mask: radial-gradient(circle at 92% 8%, #000, transparent 32%), radial-gradient(circle at 4% 96%, #000, transparent 30%);
 }
 
-/* ---- always moving: a scan bar sweeping down, glitter drifting up, halftone breathing,
-   neon running round the glass edges. Transforms and opacity only, so phones stay smooth. ---- */
-.scan { display: none; }
-:root[data-theme="capri"] .scan {
-  display: block; position: absolute; left: 0; right: 0; top: 0; height: 26vh; pointer-events: none;
-  background: linear-gradient(transparent, rgba(255, 46, 92, .05) 70%, rgba(255, 106, 149, .22) 98%, transparent);
-  animation: capri-scan 7s linear infinite;
+/* ---- always moving: neon light slowly wheeling behind everything, glitter drifting up, halftone
+   breathing, neon running round the glass edges. Transforms and opacity only, so phones stay smooth. ---- */
+.aurora { display: none; }
+:root[data-theme="capri"] .aurora {
+  display: block; position: absolute; left: 50%; top: 50%; width: 170vmax; height: 170vmax; margin: -85vmax 0 0 -85vmax;
+  pointer-events: none; opacity: .5; z-index: -1;
+  background: conic-gradient(from 0deg,
+    transparent 0deg, rgba(255, 46, 92, .5) 40deg, transparent 95deg,
+    transparent 150deg, rgba(154, 77, 255, .45) 195deg, transparent 250deg,
+    transparent 290deg, rgba(255, 46, 92, .25) 320deg, transparent 350deg);
+  -webkit-mask: radial-gradient(closest-side, transparent 4%, #000 32%, transparent 85%);
+  mask: radial-gradient(closest-side, transparent 4%, #000 32%, transparent 85%);
+  animation: capri-aurora 48s linear infinite, capri-aurora-pulse 7s ease-in-out infinite alternate;
 }
-@keyframes capri-scan { from { transform: translateY(-30vh); } to { transform: translateY(130vh); } }
+@keyframes capri-aurora { to { transform: rotate(1turn); } }
+@keyframes capri-aurora-pulse { from { opacity: .4; } to { opacity: .75; } }
 :root[data-theme="capri"] .backdrop::before { inset: 0 0 -420px; animation: capri-dust 38s linear infinite, capri-twinkle 2.6s ease-in-out infinite alternate; }
 @keyframes capri-dust { to { transform: translateY(-420px); } }
 @keyframes capri-twinkle { from { opacity: .35; } to { opacity: .75; } }

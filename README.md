@@ -105,7 +105,7 @@ The apps are ad-hoc signed, not notarised (that needs a paid Apple Developer acc
 - **Command palette** (⌘K) for tasks, projects, labels and commands
 - **Dashboard:** overdue/today/week counts, completed-per-day chart, open tasks by project
 - Undo on complete, mobile layout, auto-sync: changes made in Todoist or on another device show up within ~20 seconds (and right away when you come back to Capri), without pressing Sync
-- **Three themes:** Light, Dark (Capricorn gold on midnight) and **Capri**, the flagship neon theme, always gently moving: glowing hot-red glitter shards that drift and glitch, a scan bar sweeping down, drifting glitter, an acid-green splinter, violet offsets, HUD corner ticks, chromatic-split headings, halftone and scanlines on near-black. Click the theme button to cycle (the new theme spreads out from the button), or ⌘K → *Theme: …*
+- **Three themes:** Light, Dark (Capricorn gold on midnight) and **Capri**, the flagship neon theme, always gently moving: glowing hot-red glitter shards that drift and glitch, slow neon light wheeling behind everything, drifting glitter, an acid-green splinter, violet offsets, HUD corner ticks, chromatic-split headings, halftone and scanlines on near-black. Click the theme button to cycle (the new theme spreads out from the button), or ⌘K → *Theme: …*
 
 ### New in this version
 
