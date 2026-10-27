@@ -2071,17 +2071,60 @@ async function createSection() {
   } catch (err) { toast(err.message); }
 }
 
-async function rescheduleOverdue() {
+async function rescheduleOverdue(btn) {
   const t = today();
   const overdue = openTasks().filter((x) => dueDay(x) && dueDay(x) < t);
   // Rescheduling a recurring task through the API would drop its recurrence, so leave those alone.
   const movable = overdue.filter((x) => !x.due.is_recurring);
   const skipped = overdue.length - movable.length;
   if (!movable.length) return toast('Only recurring tasks are overdue — complete or edit those individually');
-  await Promise.all(movable.map((x) => updateTask(x.id, { due_string: 'today' }, { rerender: false })));
-  render();
+  btn?.classList.add('busy');
+  // The overdue rows sweep out one after another while the changes save…
+  movable.forEach((x, i) => {
+    const row = $(`.task[data-task="${x.id}"]`);
+    if (row) { row.style.animationDelay = `${Math.min(i, 8) * 40}ms`; row.classList.add('resched-out'); }
+  });
+  const sweep = new Promise((r) => setTimeout(r, reducedMotion() ? 0 : 320 + Math.min(movable.length, 8) * 40));
+  try {
+    await Promise.all([sweep, ...movable.map((x) => updateTask(x.id, { due_string: 'today' }, { rerender: false }))]);
+  } finally {
+    render();
+  }
+  // …then land in Today with a glow.
+  movable.forEach((x, i) => {
+    const row = $(`.task[data-task="${x.id}"]`);
+    if (!row) return;
+    row.style.animationDelay = `${Math.min(i, 8) * 45}ms`;
+    row.classList.add('resched-in');
+    row.addEventListener('animationend', () => { row.classList.remove('resched-in'); row.style.animationDelay = ''; }, { once: true });
+  });
   toast(`Moved ${movable.length} to today${skipped ? ` · skipped ${skipped} recurring` : ''}`);
 }
+
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Tap feedback: every button flashes a ripple from where you pressed it. It's drawn on its own layer,
+// so it still plays when the click redraws the button underneath.
+const TAPPABLE = 'button, .nav-item, .chip, .date-pill, .dd-btn, .dd-opt, [data-act], .ctx-item, a.btn';
+document.addEventListener('pointerdown', (e) => {
+  if (e.button > 0) return;
+  const el = e.target.closest(TAPPABLE);
+  if (!el || el.disabled || el.closest('canvas, .canvas-wrap')) return;
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const fx = document.createElement('span');
+  fx.className = 'tap-fx';
+  const cs = getComputedStyle(el);
+  Object.assign(fx.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px`, borderRadius: cs.borderRadius });
+  const size = Math.hypot(Math.max(e.clientX - r.left, r.right - e.clientX), Math.max(e.clientY - r.top, r.bottom - e.clientY)) * 2;
+  const wave = document.createElement('i');
+  Object.assign(wave.style, { width: `${size}px`, height: `${size}px`, left: `${e.clientX - r.left - size / 2}px`, top: `${e.clientY - r.top - size / 2}px` });
+  fx.appendChild(wave);
+  document.body.appendChild(fx);
+  setTimeout(() => fx.remove(), 650);
+}, { capture: true, passive: true });
+// iOS only shows :active press states when the page listens for touches.
+document.addEventListener('touchstart', () => {}, { passive: true });
 
 async function runBulk(action, value) {
   const ids = [...state.picked];
@@ -2238,7 +2281,7 @@ document.addEventListener('click', (e) => {
     if (a === 'duplicate') return duplicateTask(state.detailId);
     if (a === 'copy') { navigator.clipboard?.writeText(plain(taskById(state.detailId)?.content)); return toast('Copied'); }
     if (a === 'add-section') return createSection();
-    if (a === 'reschedule-overdue') return rescheduleOverdue();
+    if (a === 'reschedule-overdue') return rescheduleOverdue(act);
     if (a === 'new-sketch') return openDraw({});
     if (a === 'h-today') return setDue(target, 'today');
     if (a === 'h-tomorrow') return setDue(target, 'tomorrow');
@@ -2388,6 +2431,11 @@ $('#theme-btn').addEventListener('click', toggleTheme);
 $('#refresh-btn').addEventListener('click', () => sync());
 $('#add-project').addEventListener('click', createProject);
 $('#menu-btn').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+// Phone: tapping anywhere outside the sidebar, or picking something in it, closes it.
+$('#sidebar-scrim').addEventListener('pointerdown', (e) => { e.preventDefault(); $('#sidebar').classList.remove('open'); });
+$('#sidebar').addEventListener('click', (e) => {
+  if (e.target.closest('.nav-item, #sidebar-add, #sidebar-search')) $('#sidebar').classList.remove('open');
+});
 $('#timer-toggle').addEventListener('click', () => (timer.running ? pauseTimer() : startTimer()));
 $('#timer-reset').addEventListener('click', resetTimer);
 $('#timer-switch').addEventListener('click', switchTimer);
