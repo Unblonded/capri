@@ -285,6 +285,6 @@ app.delete('/api/drawings/:id', (req, res) => {
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, () => {
-  console.log(`Prism running at http://localhost:${PORT}`);
+  console.log(`Capri running at http://localhost:${PORT}`);
   if (!token) console.log('Not connected yet — open the app and paste your Todoist API token.');
 });

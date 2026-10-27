@@ -1,4 +1,4 @@
-// Prism front end. Plain ES modules, no build step.
+// Capri front end. Plain ES modules, no build step.
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -33,8 +33,8 @@ const ICONS = {
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   done: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
-  // Faceted prism: a lit face and a shaded face, so it never reads as a warning sign.
-  prism: '<path d="M12 4l8 15h-8z" fill="currentColor" stroke-width="1.4"/><path d="M12 4L4 19h8z" fill="currentColor" fill-opacity=".38" stroke-width="1.4"/>',
+  // Capri logo: the sun setting over two waves.
+  capri: '<circle cx="12" cy="9" r="4.2" fill="currentColor" stroke="none"/><path d="M2.5 15.5c2.4-1.8 4.8-1.8 7.2 0s4.8 1.8 7.2 0 3.6-1.4 4.6-.6"/><path d="M2.5 20c2.4-1.8 4.8-1.8 7.2 0s4.8 1.8 7.2 0 3.6-1.4 4.6-.6" opacity=".6"/>',
   warn: '<path d="M10.3 4.3a2 2 0 0 1 3.4 0l7.5 13a2 2 0 0 1-1.7 3H4.5a2 2 0 0 1-1.7-3z"/><path d="M12 9.5v4M12 17h.01"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
@@ -82,7 +82,7 @@ const state = {
   quickContext: null,
   doneToday: null,
   comments: { id: null, html: '' },
-  baseTitle: 'Prism',
+  baseTitle: 'Capri',
 };
 
 const store = {
@@ -656,7 +656,7 @@ function renderView() {
   $('#view-sub').textContent = sub;
   $('#head-actions').innerHTML = actions;
   viewEl.innerHTML = html;
-  state.baseTitle = `${title} · Prism`;
+  state.baseTitle = `${title} · Capri`;
   renderRing();
   renderTimer();
 }
@@ -1260,7 +1260,7 @@ setInterval(() => {
     saveTimer();
     chime();
     toast(msg);
-    if ('Notification' in window && Notification.permission === 'granted') new Notification('Prism', { body: msg });
+    if ('Notification' in window && Notification.permission === 'granted') new Notification('Capri', { body: msg });
   }
   renderTimer();
 }, 1000);

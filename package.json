@@ -1,7 +1,7 @@
 {
-  "name": "prism",
+  "name": "capri",
   "version": "0.1.0",
-  "description": "Prism — a liquid-glass Todoist client running on Express",
+  "description": "Capri — a liquid-glass Todoist client running on Express",
   "main": "server.js",
   "type": "module",
   "scripts": {
