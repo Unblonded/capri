@@ -2125,21 +2125,6 @@ const releasePress = () => {
 };
 document.addEventListener('pointerup', releasePress, true);
 document.addEventListener('pointercancel', releasePress, true);
-// iOS home-screen apps with a see-through status bar can lay the page out shorter than the screen,
-// leaving a black strip along the bottom. Measure the shortfall and let the CSS stretch over it.
-function fixStandaloneHeight() {
-  if (!navigator.standalone) return;
-  // Don't measure with the keyboard up; it shrinks the window on purpose.
-  if (/INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return;
-  const portrait = innerHeight >= innerWidth;
-  const full = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
-  const gap = Math.max(0, Math.min(120, full - innerHeight));
-  document.documentElement.style.setProperty('--vh-gap', `${gap}px`);
-}
-fixStandaloneHeight();
-addEventListener('resize', fixStandaloneHeight);
-addEventListener('orientationchange', () => setTimeout(fixStandaloneHeight, 300));
-
 // iOS only shows :active press states when the page listens for touches.
 document.addEventListener('touchstart', () => {}, { passive: true });
 
