@@ -33,7 +33,7 @@ const ICONS = {
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   done: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
-  // Capri logo: a hand-drawn ♑ (Capricorn) glyph.
+  // Capri logo: a check climbing out of a faded mountain ridge.
   capri: '<path d="M2.5 19.5 8.7 11.4l3 3.4" opacity=".45"/><path d="M6.2 16.9l4 3.4L21 5.4"/>',
   warn: '<path d="M10.3 4.3a2 2 0 0 1 3.4 0l7.5 13a2 2 0 0 1-1.7 3H4.5a2 2 0 0 1-1.7-3z"/><path d="M12 9.5v4M12 17h.01"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',

@@ -1,6 +1,6 @@
 # Capri ♑
 
-Steady climb, one task at a time. Named for Capricorn: midnight-sky glass, gold accents, and a hand-drawn ♑ mark. A nicer, more advanced Todoist client on Express + Node.js that syncs with your real Todoist account.
+Steady climb, one task at a time. Named for Capricorn, the steady climber: midnight-sky glass, gold accents, and a gold check climbing out of a mountain ridge as its mark. A nicer, more advanced Todoist client on Express + Node.js that syncs with your real Todoist account.
 
 ## Run it
 
@@ -82,7 +82,7 @@ This produces `dist/Capri-Setup-<version>.exe` (installer) and `dist/Capri-Porta
 
 ## Phone app (iPhone / Android)
 
-No App Store or developer account needed. Open your Capri address (e.g. https://capri.kalculator.lol) in **Safari** → Share → **Add to Home Screen**. The ♑ icon then opens Capri full screen in its own window, and stays signed in. On Android, use Chrome → menu → *Add to Home screen* / *Install app*.
+No App Store or developer account needed. Open your Capri address (e.g. https://capri.kalculator.lol) in **Safari** → Share → **Add to Home Screen**. The Capri icon then opens Capri full screen in its own window, and stays signed in. On Android, use Chrome → menu → *Add to Home screen* / *Install app*.
 
 Capri keeps a copy of itself and your last tasks on the device (`public/sw.js`), so it opens instantly and still shows your tasks with no signal. Updates download in the background; a *Capri has been updated · Reload* notice appears when one is ready. Signing out deletes the saved tasks.
 
@@ -105,7 +105,7 @@ The apps are ad-hoc signed, not notarised (that needs a paid Apple Developer acc
 - **Command palette** (⌘K) for tasks, projects, labels and commands
 - **Dashboard:** overdue/today/week counts, completed-per-day chart, open tasks by project
 - Undo on complete, mobile layout, auto-sync: changes made in Todoist or on another device show up within ~20 seconds (and right away when you come back to Capri), without pressing Sync
-- **Three themes:** Light, Dark (Capricorn gold on midnight) and **Capri**, the flagship neon theme: glowing hot-red glitter shards that glitch now and then, an acid-green splinter, violet offsets, HUD corner ticks, chromatic-split headings, halftone and scanlines on near-black. Click the theme button to cycle (the new theme spreads out from the button), or ⌘K → *Theme: …*
+- **Three themes:** Light, Dark (Capricorn gold on midnight) and **Capri**, the flagship neon theme, always gently moving: glowing hot-red glitter shards that drift and glitch, a scan bar sweeping down, drifting glitter, an acid-green splinter, violet offsets, HUD corner ticks, chromatic-split headings, halftone and scanlines on near-black. Click the theme button to cycle (the new theme spreads out from the button), or ⌘K → *Theme: …*
 
 ### New in this version
 
