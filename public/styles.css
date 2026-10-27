@@ -428,8 +428,10 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .ask-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .quick-card { padding: 16px 18px; display: grid; gap: 8px; }
 .quick-card input, .quick-card textarea { border: 0; background: none; outline: none; resize: none; }
-.qi-wrap { position: relative; }
-.qi-wrap input, .qi-mirror { font-size: 17px; font-weight: 600; padding: 3px 0; margin: 0; width: 100%; letter-spacing: normal; line-height: 1.5; }
+/* The title is the headline, on its own underlined row; the description is a quieter note beneath it. */
+.qi-wrap { position: relative; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+/* !important beats the phones' 16px input floor, which would shrink the input but not its highlight mirror. */
+.qi-wrap input, .qi-mirror { font-size: 22px !important; font-weight: 700; padding: 3px 0; margin: 0; width: 100%; letter-spacing: normal; line-height: 1.4; }
 .qi-wrap input { position: relative; z-index: 1; background: transparent; }
 .qi-mirror { position: absolute; inset: 0; white-space: pre; overflow: hidden; color: transparent; pointer-events: none; }
 .qi-mirror mark { color: transparent; border-radius: 6px; box-shadow: 0 0 0 2px var(--mk); background: var(--mk); }
@@ -442,7 +444,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .chip-x { border: 0; background: none; color: inherit; padding: 0; margin-left: 2px; display: grid; place-items: center; opacity: .7; }
 @media (hover: hover) { .chip-x:hover { opacity: 1; } }
 .chip-x .ic { width: 12px; height: 12px; }
-.quick-card textarea { color: var(--muted); }
+.quick-card textarea { color: var(--muted); font-size: 13.5px; line-height: 1.5; padding: 2px 0; }
 .quick-dates { display: flex; gap: 8px; flex-wrap: wrap; }
 .date-pill {
   display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--glass-border); background: var(--glass-inset);
