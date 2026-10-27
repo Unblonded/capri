@@ -9,6 +9,14 @@ import { fileURLToPath } from 'node:url';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const run = (cmd) => execSync(cmd, { cwd: root, stdio: 'inherit', env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' } });
 
+// npm install rewrites package-lock.json on the server, and any edited tracked file blocks the pull.
+// Set those changes aside (recoverable with `git stash list` / `git stash pop`) rather than failing.
+const changed = execSync('git status --porcelain --untracked-files=no', { cwd: root, encoding: 'utf8' }).trim();
+if (changed) {
+  console.log(`Setting aside local changes so the update can apply:\n${changed}\n`);
+  run('git stash push -m "capri-update: local changes before update"');
+}
+
 run('git pull --ff-only');
 
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
