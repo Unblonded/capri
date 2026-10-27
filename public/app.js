@@ -2123,6 +2123,21 @@ document.addEventListener('pointerdown', (e) => {
   document.body.appendChild(fx);
   setTimeout(() => fx.remove(), 650);
 }, { capture: true, passive: true });
+// iOS home-screen apps with a see-through status bar can lay the page out shorter than the screen,
+// leaving a black strip along the bottom. Measure the shortfall and let the CSS stretch over it.
+function fixStandaloneHeight() {
+  if (!navigator.standalone) return;
+  // Don't measure with the keyboard up; it shrinks the window on purpose.
+  if (/INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return;
+  const portrait = innerHeight >= innerWidth;
+  const full = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+  const gap = Math.max(0, Math.min(120, full - innerHeight));
+  document.documentElement.style.setProperty('--vh-gap', `${gap}px`);
+}
+fixStandaloneHeight();
+addEventListener('resize', fixStandaloneHeight);
+addEventListener('orientationchange', () => setTimeout(fixStandaloneHeight, 300));
+
 // iOS only shows :active press states when the page listens for touches.
 document.addEventListener('touchstart', () => {}, { passive: true });
 
@@ -2218,8 +2233,26 @@ function showConnect() {
 if ('serviceWorker' in navigator && isSecureContext) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
   navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data === 'capri-updated') toast('Capri has been updated', { label: 'Reload', run: () => location.reload() });
+    if (e.data !== 'capri-updated') return;
+    // Nothing open or being typed: just switch to the new version. Otherwise let you finish first.
+    const busy = !$('#detail').classList.contains('hidden') || $$('.modal:not(.hidden)').length
+      || /INPUT|TEXTAREA/.test(document.activeElement?.tagName) || pendingDeletes.size || writes.pending;
+    if (!busy) { toast('Updating Capri…'); setTimeout(() => location.reload(), 600); }
+    else toast('Capri has been updated', { label: 'Reload', run: () => location.reload() });
   });
+  // A home-screen app is usually resumed rather than reloaded, so the cache would never look for a new
+  // version. Each time Capri comes back to the front (at most once a minute), and every 10 minutes while
+  // it's open, ask the server; sw.js compares the files and sends 'capri-updated' if they changed.
+  let lastUpdateCheck = Date.now();
+  const checkForUpdate = () => {
+    if (document.hidden || !navigator.serviceWorker.controller || Date.now() - lastUpdateCheck < 60000) return;
+    lastUpdateCheck = Date.now();
+    navigator.serviceWorker.getRegistration().then((r) => r?.update()).catch(() => {});
+    for (const f of ['/', '/app.js', '/styles.css']) fetch(f).catch(() => {});
+  };
+  document.addEventListener('visibilitychange', checkForUpdate);
+  addEventListener('focus', checkForUpdate);
+  setInterval(checkForUpdate, 10 * 60000);
 }
 
 async function boot() {
