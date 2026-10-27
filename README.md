@@ -1,6 +1,6 @@
-# Todoist+
+# Prism
 
-A nicer, more advanced Todoist client that runs locally on Express + Node.js and syncs with your real Todoist account.
+Your Todoist, refracted. A nicer, more advanced Todoist client that runs locally on Express + Node.js and syncs with your real Todoist account.
 
 ## Run it
 

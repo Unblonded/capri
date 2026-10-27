@@ -1,7 +1,7 @@
 {
-  "name": "todoist-ext",
+  "name": "prism",
   "version": "0.1.0",
-  "description": "A nicer, more advanced Todoist client running on Express",
+  "description": "Prism — a liquid-glass Todoist client running on Express",
   "main": "server.js",
   "type": "module",
   "scripts": {
