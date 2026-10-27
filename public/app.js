@@ -624,10 +624,16 @@ function openTaskMenu(id, x, y) {
     else items[opt.dataset.i][2]();
   });
   document.body.appendChild(menu);
-  // Keep it on screen.
-  const r = menu.getBoundingClientRect();
-  menu.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(y, innerHeight - r.height - 8))}px`;
+  // Keep it on screen. offsetWidth/Height ignore the opening animation's scale, so the size is real.
+  const gap = 8;
+  menu.style.maxHeight = `${innerHeight - gap * 2}px`;
+  const w = menu.offsetWidth;
+  const h = menu.offsetHeight;
+  const left = x + w + gap > innerWidth ? x - w : x;   // flip left near the right edge
+  const top = y + h + gap > innerHeight ? y - h : y;   // open upward when there's no room below
+  menu.style.left = `${Math.max(gap, Math.min(left, innerWidth - w - gap))}px`;
+  menu.style.top = `${Math.max(gap, Math.min(top, innerHeight - h - gap))}px`;
+  menu.style.transformOrigin = `${left < x ? 'right' : 'left'} ${top < y ? 'bottom' : 'top'}`;
   ctxMenu = menu;
   state.selectedId = id;
   $$('.task.selected').forEach((el) => el.classList.toggle('selected', el.dataset.task === id));
