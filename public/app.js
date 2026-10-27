@@ -2484,7 +2484,7 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('change', (e) => {
-  if (e.target.id === 'sort-select') { state.sort = e.target.value; store.set('sort', state.sort); return renderView(); }
+  if (e.target.id === 'sort-select') { state.sort = e.target.value; store.set('sort', state.sort); return renderAnimated(); }
   if (e.target.id === 'bulk-prio') { const v = Number(e.target.value); e.target.value = ''; return v && runBulk('priority', v); }
   if (e.target.id === 'quick-due' || e.target.id === 'quick-deadline') { syncDateFields($('#quick')); return updateQuickPreview(); }
   const id = state.detailId;
