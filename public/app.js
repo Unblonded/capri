@@ -79,6 +79,7 @@ const state = {
   lastSync: 0,
   quickContext: null,
   doneToday: null,
+  comments: { id: null, html: '' },
   baseTitle: 'Todoist+',
 };
 
@@ -376,7 +377,7 @@ function render() {
   renderSidebar();
   renderView();
   // Don't wipe what the user is typing in the drawer when a background render happens.
-  if (!$('#detail').contains(document.activeElement) || !state.detailId) renderDetail();
+  refreshDetail();
   renderBulk();
 }
 
@@ -739,6 +740,26 @@ function renderBulk() {
 
 // ---------- detail drawer ----------
 
+// Re-renders the drawer after a change without losing what the user is in the middle of:
+// the focused field (and any unsaved text in it), the caret, and the scroll position.
+function refreshDetail() {
+  const el = $('#detail');
+  const a = document.activeElement;
+  const keep = a?.id && el.contains(a)
+    ? { id: a.id, value: a.value, start: a.selectionStart, end: a.selectionEnd, text: a.matches('textarea, input:not([type="date"])') }
+    : null;
+  const scroll = el.scrollTop;
+  renderDetail();
+  el.scrollTop = scroll;
+  const next = keep && document.getElementById(keep.id);
+  if (!next) return;
+  if (keep.text) {
+    next.value = keep.value;
+    try { next.setSelectionRange(keep.start, keep.end); } catch { /* not a text field */ }
+  }
+  next.focus({ preventScroll: true });
+}
+
 function renderDetail() {
   const el = $('#detail');
   const t = taskById(state.detailId);
@@ -807,7 +828,7 @@ function renderDetail() {
     </div>
 
     <div class="section-title">Comments</div>
-    <div class="comments" id="d-comments"><span class="muted small">Loading…</span></div>
+    <div class="comments" id="d-comments">${state.comments.id === t.id ? state.comments.html : '<span class="muted small">Loading…</span>'}</div>
     <form class="comment-form" id="comment-form"><input id="comment-input" placeholder="Write a comment…" /><button class="btn sm">Send</button></form>
 
     <div class="detail-actions">
@@ -819,16 +840,18 @@ function renderDetail() {
 
   const ta = $('#d-content');
   ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px';
-  loadComments(t.id);
+  // Only fetch comments when a different task is opened; re-renders reuse what we have.
+  if (state.comments.id !== t.id) loadComments(t.id);
 }
 
 async function loadComments(id) {
   try {
     const { comments } = await api('GET', `/api/tasks/${id}/comments`);
-    if (state.detailId !== id) return;
-    $('#d-comments').innerHTML = comments.length ? comments.map((c) =>
+    const html = comments.length ? comments.map((c) =>
       `<div class="comment"><div class="when">${esc(new Date(c.posted_at).toLocaleString())}</div>${md(c.content)}</div>`).join('')
       : '<span class="muted small">No comments yet</span>';
+    state.comments = { id, html };
+    if (state.detailId === id) $('#d-comments').innerHTML = html;
   } catch { /* drawer still works without comments */ }
 }
 
