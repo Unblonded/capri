@@ -495,7 +495,7 @@ document.addEventListener('pointerdown', (e) => {
   if (e.pointerType !== 'touch' || swipe) return;
   const row = e.target.closest('#view .task[data-task]');
   if (!row || e.target.closest('input, textarea, select, button.icon-btn')) return;
-  swipe = { row, id: row.dataset.task, pid: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, active: false };
+  swipe = { row, id: row.dataset.task, pid: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, active: false, onCheck: e.target.closest('.check') };
 });
 
 document.addEventListener('pointermove', (e) => {
@@ -520,9 +520,16 @@ document.addEventListener('pointermove', (e) => {
 
 function endSwipe(e) {
   if (!swipe || e.pointerId !== swipe.pid) return;
-  const { row, id, dx, active } = swipe;
+  const { row, id, dx, active, onCheck } = swipe;
   swipe = null;
-  if (!active) return;
+  if (!active) {
+    // Complete straight from the tap instead of waiting for a click: iOS sometimes drops the click.
+    if (onCheck && e.type === 'pointerup' && e.target.closest?.('.check') === onCheck) {
+      swipeEndedAt = Date.now();
+      completeTask(id);
+    }
+    return;
+  }
   swipeEndedAt = Date.now();
   row.classList.remove('swiping', 'swipe-armed');
   const commit = e.type === 'pointerup' && Math.abs(dx) > row.offsetWidth * SWIPE_COMMIT;
@@ -599,11 +606,48 @@ function animateViewIn() {
 
 function render() {
   renderSidebar();
+  moveNavPill();
   renderView();
   // Don't wipe what the user is typing in the drawer when a background render happens.
   refreshDetail();
   renderBulk();
 }
+
+// One glass pill slides (with a little liquid stretch) to whichever sidebar item is active.
+let navPillAt = null;
+function moveNavPill() {
+  const sidebar = $('#sidebar');
+  let pill = $('.nav-pill', sidebar);
+  if (!pill) {
+    pill = document.createElement('span');
+    pill.className = 'nav-pill';
+    sidebar.prepend(pill);
+  }
+  const item = $('.nav-item.active', sidebar);
+  sidebar.classList.toggle('has-pill', Boolean(item));
+  if (!item) { pill.style.opacity = '0'; navPillAt = null; return; }
+  const sr = sidebar.getBoundingClientRect();
+  const r = item.getBoundingClientRect();
+  if (!r.height) return; // sidebar not laid out yet (hidden)
+  const top = r.top - sr.top + sidebar.scrollTop;
+  const left = r.left - sr.left;
+  const first = navPillAt === null;
+  const jumped = !first && Math.abs(top - navPillAt) > 1;
+  pill.classList.toggle('instant', first);
+  pill.style.opacity = '1';
+  pill.style.width = `${r.width}px`;
+  pill.style.height = `${r.height}px`;
+  pill.style.transform = `translate(${left}px, ${top}px)`;
+  if (jumped) {
+    // Stretch toward the direction of travel, then settle.
+    pill.classList.remove('jump-down', 'jump-up');
+    void pill.offsetWidth;
+    pill.classList.add(top > navPillAt ? 'jump-down' : 'jump-up');
+  }
+  navPillAt = top;
+}
+addEventListener('resize', () => moveNavPill());
+document.fonts?.ready.then(() => moveNavPill());
 
 function navItem({ type, id, ico, dot, name, count, alert }) {
   const active = state.view.type === type && (state.view.id || '') === (id || '');

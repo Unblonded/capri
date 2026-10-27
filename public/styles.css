@@ -250,9 +250,11 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .group { margin-bottom: 22px; border-radius: 16px; transition: background .15s, box-shadow .15s; }
 .group.drop-hover { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent); }
 .group-head {
-  display: flex; align-items: center; gap: 8px; padding: 8px 6px; border-bottom: 1px solid var(--line);
-  font-weight: 700; font-size: 14px; position: sticky; top: 0; z-index: 2; cursor: default;
-  background: linear-gradient(var(--glass-strong), transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  display: flex; align-items: center; gap: 8px; padding: 7px 12px 7px 8px; margin-bottom: 4px;
+  font-weight: 700; font-size: 14px; position: sticky; top: 4px; z-index: 2; cursor: default;
+  border: 1px solid var(--glass-border); border-radius: 14px;
+  background: var(--glass-strong); box-shadow: 0 4px 14px var(--glass-shade), inset 0 1px 0 var(--glass-edge);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
 }
 .group-head .caret { border: 0; background: none; color: var(--muted); width: 18px; padding: 0; transition: transform .2s; font-size: 10px; }
 .group.collapsed .caret { transform: rotate(-90deg); }
@@ -304,7 +306,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
   background: var(--glass-strong); border: 1px solid var(--glass-border); border-radius: 10px; padding: 2px;
   -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: 0 4px 14px var(--glass-shade);
 }
-.task:hover .task-actions { opacity: 1; pointer-events: auto; }
+@media (hover: hover) { .task:hover .task-actions { opacity: 1; pointer-events: auto; } }
 .task-actions .icon-btn { width: 28px; height: 26px; font-size: 13px; }
 .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
 .empty .big { font-size: 44px; margin-bottom: 10px; }
@@ -843,3 +845,21 @@ html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -we
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ---- sliding sidebar selector ---- */
+.sidebar .nav, .sidebar .sidebar-head, .sidebar > *:not(.nav-pill) { position: relative; z-index: 1; }
+.nav-pill {
+  position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; opacity: 0;
+  border-radius: 12px; background: var(--active); border: 1px solid var(--glass-border);
+  box-shadow: 0 4px 14px var(--glass-shade), inset 0 1px 0 var(--glass-edge);
+  transition: transform .6s var(--spring), width .4s var(--ease-out), height .4s var(--ease-out), opacity .2s;
+}
+.nav-pill.instant { transition: none; }
+.nav-pill.jump-down { animation: pill-stretch-down .6s var(--ease-out); }
+.nav-pill.jump-up { animation: pill-stretch-up .6s var(--ease-out); }
+/* The pill's own transform moves it, so the stretch rides on scale via the individual property. */
+@keyframes pill-stretch-down { 0% { scale: 1 1; transform-origin: top; } 30% { scale: .94 1.35; } 65% { scale: 1.02 .94; } 100% { scale: 1 1; } }
+@keyframes pill-stretch-up { 0% { scale: 1 1; } 30% { scale: .94 1.35; } 65% { scale: 1.02 .94; } 100% { scale: 1 1; } }
+.sidebar.has-pill .nav-item.active { background: transparent; border-color: transparent; box-shadow: none; }
+:root[data-theme="capri"] .nav-pill { box-shadow: inset 3px 0 0 var(--accent), 0 2px 10px var(--glass-shade); }
+:root[data-theme="capri"] .sidebar.has-pill .nav-item.active { box-shadow: none; }
