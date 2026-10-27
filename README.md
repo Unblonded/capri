@@ -91,6 +91,7 @@ The apps are ad-hoc signed, not notarised (that needs a paid Apple Developer acc
 - **Quick add** with natural language and live inline highlighting. Dates are detected as you type, shorthand included: `tod`, `tmr`/`tmrw`, `fri`, `wed 3pm`, `next mon`, `nov 12`, `11/2`, `in 2 weeks`, `tonight`, `at noon`. The date is pulled out of the title and set as the do date; hit × on the date chip if a word wasn't meant as a date. `every …` repeats are passed to Todoist untouched
 - **Task drawer:** edit name, description, due (natural language), project/section, priority, labels, sub-tasks, comments, delete
 - **On phones:** swipe a task right to complete it, left to delete it (with a few seconds to undo); no accidental zooming when tapping fields
+- **Right-click a task** for a menu: complete, open, do today/tomorrow/next week, remove date, deadline, priority P1–P4, sketch, focus timer, duplicate, copy text, delete
 - **Command palette** (⌘K) for tasks, projects, labels and commands
 - **Dashboard:** overdue/today/week counts, completed-per-day chart, open tasks by project
 - Undo on complete, mobile layout, auto-sync: changes made in Todoist or on another device show up within ~20 seconds (and right away when you come back to Capri), without pressing Sync

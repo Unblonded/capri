@@ -571,6 +571,90 @@ document.addEventListener('click', (e) => {
   if (Date.now() - swipeEndedAt < 400) { e.stopPropagation(); e.preventDefault(); }
 }, true);
 
+// ---------- task right-click menu ----------
+let ctxMenu = null;
+function closeTaskMenu() { ctxMenu?.remove(); ctxMenu = null; }
+
+function openTaskMenu(id, x, y) {
+  const t = taskById(id);
+  if (!t) return;
+  closeDropdown();
+  closeTaskMenu();
+  const repeats = t.due?.is_recurring;
+  const items = [
+    ['check', 'Complete', () => completeTask(id)],
+    ['external', 'Open', () => openDetail(id)],
+    '-',
+    ['sun', 'Do today', () => setDue(id, 'today')],
+    ['arrow', 'Do tomorrow', () => setDue(id, 'tomorrow')],
+    ['nextweek', 'Next week', () => setDue(id, 'next monday')],
+    t.due && ['close', 'Remove date', () => setDue(id, 'no date')],
+    ['flag', 'Set deadline…', () => openDetail(id, '#d-deadline')],
+    'priority',
+    ['pencil', 'Sketch', () => openDraw({ taskId: id })],
+    ['timer', 'Focus timer', () => startTimer(id)],
+    '-',
+    ['duplicate', 'Duplicate', () => duplicateTask(id)],
+    ['copy', 'Copy text', () => { navigator.clipboard?.writeText(plain(t.content)); toast('Copied'); }],
+    '-',
+    ['trash', 'Delete', () => deleteTask(id), 'danger'],
+  ].filter(Boolean);
+
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu ctx-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = items.map((it) => {
+    if (it === '-') return '<div class="ctx-sep"></div>';
+    if (it === 'priority') {
+      return `<div class="ctx-prio" role="group" aria-label="Priority">${[4, 3, 2, 1].map((p) =>
+        `<button class="ctx-p ${prioClass(p)} ${t.priority === p ? 'on' : ''}" data-ctx-prio="${p}" title="Priority ${5 - p}">P${5 - p}</button>`).join('')}</div>`;
+    }
+    const [icon, label, , cls = ''] = it;
+    return `<button class="dd-opt ${cls}" role="menuitem" data-i="${items.indexOf(it)}">${ic(icon)}<span class="dd-text">${esc(label)}</span></button>`;
+  }).join('');
+  if (repeats) menu.insertAdjacentHTML('afterbegin', `<div class="ctx-note">${ic('repeat')} Repeats ${esc(t.due.string)}</div>`);
+
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation(); // the page's own click handler shouldn't see menu clicks
+    const prio = e.target.closest('[data-ctx-prio]');
+    const opt = e.target.closest('[data-i]');
+    if (!prio && !opt) return;
+    closeTaskMenu();
+    if (prio) setPriority(id, Number(prio.dataset.ctxPrio));
+    else items[opt.dataset.i][2]();
+  });
+  document.body.appendChild(menu);
+  // Keep it on screen.
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, innerHeight - r.height - 8))}px`;
+  ctxMenu = menu;
+  state.selectedId = id;
+  $$('.task.selected').forEach((el) => el.classList.toggle('selected', el.dataset.task === id));
+  $(`.task[data-task="${id}"]`)?.classList.add('selected');
+  menu.querySelector('button')?.focus({ preventScroll: true });
+}
+
+document.addEventListener('contextmenu', (e) => {
+  const row = e.target.closest('.task[data-task]');
+  if (!row || e.target.closest('input, textarea')) return;
+  e.preventDefault();
+  openTaskMenu(row.dataset.task, e.clientX, e.clientY);
+});
+document.addEventListener('pointerdown', (e) => { if (ctxMenu && !ctxMenu.contains(e.target)) closeTaskMenu(); }, true);
+document.addEventListener('keydown', (e) => {
+  if (!ctxMenu) return;
+  const opts = $$('button', ctxMenu);
+  const i = opts.indexOf(document.activeElement);
+  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeTaskMenu(); }
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault(); e.stopPropagation();
+    opts[(i + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length]?.focus();
+  } else if (!['Enter', ' ', 'Tab'].includes(e.key)) e.stopPropagation(); // don't fire app shortcuts underneath
+}, true);
+addEventListener('resize', closeTaskMenu);
+document.addEventListener('scroll', closeTaskMenu, true);
+
 // ---------- liquid light ----------
 // A soft highlight follows the mouse across glass panels and task rows.
 let lightTarget = null;
