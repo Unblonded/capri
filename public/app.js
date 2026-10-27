@@ -1478,9 +1478,9 @@ function openDetail(id, focusSel) {
 function closeDetail() {
   state.detailId = null;
   renderDetail();
-  if (isTouch()) clearSelection();
+  clearSelection();
 }
-// Phones have no keyboard to move the selection with, so it only lasts while a task's drawer or menu is open.
+// On phones (no keyboard to move it) the selection only lasts while a task's drawer or menu is open.
 const isTouch = () => matchMedia('(hover: none)').matches;
 function clearSelection() {
   state.selectedId = null;
