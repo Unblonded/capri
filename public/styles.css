@@ -995,3 +995,10 @@ html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -we
 .ctx-p.p1 { color: var(--p1); } .ctx-p.p2 { color: var(--p2); } .ctx-p.p3 { color: var(--p3); }
 .ctx-p.on { background: color-mix(in srgb, currentColor 18%, transparent); border-color: currentColor; }
 .ctx-menu .dd-opt { justify-content: flex-start; gap: 10px; } .ctx-menu .dd-text { flex: 1; text-align: left; }
+
+/* ---- no accidental highlighting ---- */
+/* The interface itself (nav, buttons, task rows, headers) isn't selectable, like a native app.
+   Fields you type in, comments, and the help sheet still are. */
+body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+input, textarea, [contenteditable], .comment, .help-grid, .hint, .error { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+img, svg { -webkit-user-drag: none; }
