@@ -47,7 +47,9 @@ npm run serve
 - **Double-click `update.bat`** (Windows) or run `./update.sh` (Mac/Linux), or
 - run `npm run update` in the Capri folder.
 
-That pulls from GitHub and installs any new packages. Page changes show up on the next refresh, and server changes restart automatically. `--omit=dev` skips Electron, which the server doesn't need.
+That pulls from GitHub and installs any new packages. Page changes show up on the next refresh, and server changes restart automatically.
+
+On a **Windows** server the update also rebuilds the desktop app whenever its version changes and hosts it at `<your server>/updates`. Installed Capri apps check there every 6 hours, download new versions in the background, and install them on the next restart (or right away from the tray → *Restart to update*). The first build downloads Electron once, so that run takes a few minutes. On Mac/Linux servers the desktop build is skipped unless you run `./update.sh --desktop`, which needs Wine.
 
 ## Windows desktop app
 
@@ -58,6 +60,7 @@ That pulls from GitHub and installs any new packages. Page changes show up on th
 - Starts with Windows (hidden in the tray). Toggle from the tray menu
 - **Ctrl+Shift+Space** from anywhere opens quick add
 - *Always on top* toggle in the tray menu, and it remembers its window size and position
+- Updates itself from your Capri server (installer version only; the portable exe can't self-update). Tray → *Check for updates* checks now
 
 Build it on any machine with `npm install` then:
 

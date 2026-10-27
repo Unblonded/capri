@@ -1,6 +1,6 @@
 {
   "name": "capri",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Capri \u2014 a liquid-glass Todoist client running on Express",
   "main": "desktop/main.cjs",
   "type": "module",
@@ -10,14 +10,16 @@
     "desktop": "electron .",
     "icons": "electron desktop/make-icons.cjs",
     "dist:win": "electron-builder --win nsis portable --x64",
-    "update": "git pull --ff-only && npm install --omit=dev",
-    "serve": "node --watch server.js"
+    "update": "node scripts/update.mjs",
+    "serve": "node --watch server.js",
+    "build:desktop": "electron-builder --win nsis --publish never"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
+    "electron-updater": "^6.3.9",
     "express": "^4.21.2"
   },
   "devDependencies": {
@@ -54,7 +56,13 @@
     },
     "mac": {
       "icon": "desktop/icons/icon.png"
-    }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://capri.kalculator.lol/updates"
+      }
+    ]
   },
   "author": "Unblonded"
 }

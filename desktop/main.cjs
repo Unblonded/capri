@@ -1,5 +1,6 @@
 // Capri desktop: a tray app that opens the Capri server running on another computer.
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, nativeImage, shell, nativeTheme } = require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, globalShortcut, ipcMain, nativeImage, shell, nativeTheme } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -12,6 +13,7 @@ const TRAY_ICON = path.join(__dirname, 'icons', process.platform === 'win32' ? '
 let win = null;
 let tray = null;
 let quitting = false;
+let updateReady = null; // version number once an update has downloaded
 let config = loadConfig();
 if (!config.serverUrl) config.serverUrl = DEFAULT_SERVER;
 
@@ -161,6 +163,10 @@ function buildTrayMenu() {
     { label: 'Change server…', click: () => { showWindow(); showSetup(); } },
     { label: 'Reload', click: openServer },
     { type: 'separator' },
+    updateReady
+      ? { label: `Restart to update to ${updateReady}`, click: () => { quitting = true; autoUpdater.quitAndInstall(); } }
+      : { label: `Check for updates (v${app.getVersion()})`, enabled: canSelfUpdate(), click: () => checkForUpdates(true) },
+    { type: 'separator' },
     { label: 'Quit Capri', click: () => { quitting = true; app.quit(); } },
   ]);
 }
@@ -172,6 +178,38 @@ function createTray() {
   // Rebuild so the checkboxes reflect the current state each time.
   tray.on('right-click', () => tray.setContextMenu(buildTrayMenu()));
   tray.on('click', () => (win.isVisible() && win.isFocused() ? win.hide() : showWindow()));
+}
+
+// ---- self-updates ----
+// The Capri server builds this app and hosts it at <server>/updates, so updates come from wherever
+// the app points. Only the installed version can update itself; the portable exe can't.
+
+const canSelfUpdate = () => app.isPackaged && process.platform === 'win32' && !process.env.PORTABLE_EXECUTABLE_DIR;
+
+function checkForUpdates(manual = false) {
+  if (!canSelfUpdate() || !config.serverUrl) return;
+  autoUpdater.setFeedURL({ provider: 'generic', url: `${config.serverUrl}/updates` });
+  autoUpdater.checkForUpdates()
+    .then((r) => {
+      if (manual && !r?.isUpdateAvailable) new Notification({ title: 'Capri', body: `You're on the latest version (${app.getVersion()}).` }).show();
+    })
+    .catch((err) => { if (manual) new Notification({ title: 'Capri', body: `Couldn't check for updates: ${err.message}` }).show(); });
+}
+
+function setupUpdates() {
+  if (!canSelfUpdate()) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-downloaded', (info) => {
+    updateReady = info.version;
+    tray.setContextMenu(buildTrayMenu());
+    const note = new Notification({ title: 'Capri update ready', body: `Version ${info.version} installs next time Capri restarts. Click to restart now.` });
+    note.on('click', () => { quitting = true; autoUpdater.quitAndInstall(); });
+    note.show();
+  });
+  autoUpdater.on('error', (err) => console.warn('Update check failed:', err.message));
+  checkForUpdates();
+  setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
 }
 
 ipcMain.handle('capri:set-server', async (e, input) => {
@@ -193,6 +231,7 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     createTray();
     globalShortcut.register(QUICK_ADD_SHORTCUT, quickAdd);
+    setupUpdates();
     // First launch: start with Windows unless the user turns it off from the tray.
     if (!config.loginItemSet) {
       app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'] });

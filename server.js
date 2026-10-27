@@ -114,6 +114,14 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// The Windows app updates itself from here: `npm run update` on a Windows server builds it into dist/.
+// Only the update manifest and installer files are exposed.
+app.use('/updates', (req, res, next) => {
+  if (!/^\/(latest\.yml|Capri-Setup-[\w.-]+\.exe(\.blockmap)?)$/.test(req.path)) return res.status(404).end();
+  res.set('Cache-Control', 'no-cache');
+  next();
+}, express.static(path.join(__dirname, 'dist'), { index: false, dotfiles: 'deny' }));
+
 const wrap = (fn) => (req, res) =>
   fn(req, res).catch((err) => {
     const status = err.status || 500;
