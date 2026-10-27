@@ -611,13 +611,21 @@ function openDatePicker(btn) {
   datePop = { el, id, view };
   renderDatePicker();
   document.body.appendChild(el);
+  placeDatePicker();
+  ($('.dp-day.on', el) || $('.dp-day.today', el) || $('.dp-day', el))?.focus({ preventScroll: true });
+}
+
+// Sits under its button, or above it when there's no room below.
+function placeDatePicker() {
+  const btn = $(`[data-date-for="${datePop.id}"]`);
+  if (!btn) return closeDatePicker();
+  const { el } = datePop;
   const r = btn.getBoundingClientRect();
   const w = el.offsetWidth, h = el.offsetHeight, gap = 8;
   const below = r.bottom + 6 + h + gap <= innerHeight;
   el.style.left = `${Math.max(gap, Math.min(r.left, innerWidth - w - gap))}px`;
   el.style.top = `${below ? r.bottom + 6 : Math.max(gap, r.top - 6 - h)}px`;
   el.style.transformOrigin = below ? 'top left' : 'bottom left';
-  ($('.dp-day.on', el) || $('.dp-day.today', el) || $('.dp-day', el))?.focus({ preventScroll: true });
 }
 
 function renderDatePicker() {
@@ -660,8 +668,11 @@ function pickDate(day) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+// The date button under a tap; anywhere on a quick-add pill counts, not just its date text.
+const dateFieldAt = (target) => target.closest('.date-field[data-date-for]') || target.closest('.date-pill')?.querySelector('.date-field[data-date-for]');
+
 document.addEventListener('click', (e) => {
-  const field = e.target.closest('.date-field[data-date-for]');
+  const field = dateFieldAt(e.target);
   if (field) { e.preventDefault(); return openDatePicker(field); }
   if (!datePop || !datePop.el.contains(e.target)) return;
   e.stopPropagation();
@@ -671,7 +682,7 @@ document.addEventListener('click', (e) => {
   if (d) pickDate(d.dataset.dpDay);
 }, true);
 document.addEventListener('pointerdown', (e) => {
-  if (datePop && !datePop.el.contains(e.target) && !e.target.closest(`[data-date-for="${datePop.id}"]`)) closeDatePicker();
+  if (datePop && !datePop.el.contains(e.target) && dateFieldAt(e.target)?.dataset.dateFor !== datePop.id) closeDatePicker();
 }, true);
 document.addEventListener('keydown', (e) => {
   if (!datePop) return;
@@ -689,8 +700,10 @@ document.addEventListener('keydown', (e) => {
     $(`.dp-day[data-dp-day="${k}"]`, datePop.el)?.focus();
   } else if ((e.key === 'Enter' || e.key === ' ') && cur) { e.preventDefault(); pickDate(cur); }
 }, true);
-addEventListener('resize', closeDatePicker);
-document.addEventListener('scroll', (e) => { if (datePop && !datePop.el.contains(e.target)) closeDatePicker(); }, true);
+// Follow the button rather than closing: on phones, tapping it hides the keyboard, which resizes and
+// scrolls the page right as the picker opens.
+addEventListener('resize', () => { if (datePop) placeDatePicker(); });
+document.addEventListener('scroll', (e) => { if (datePop && !datePop.el.contains(e.target)) placeDatePicker(); }, true);
 
 // ---------- task right-click menu ----------
 let ctxMenu = null;
