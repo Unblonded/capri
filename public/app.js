@@ -1263,14 +1263,14 @@ const isRepeatString = (s) => /\b(every|daily|weekly|monthly|yearly|annually)\b/
 async function setDue(id, dueString) {
   const t = taskById(id);
   if (t?.due?.is_recurring && !isRepeatString(dueString)
-    && !confirm(`“${plain(t.content)}” repeats (${t.due.string}). Changing it to “${dueString}” removes the repeat. Continue?`)) return render();
+    && !(await confirmDropRepeat(t, `Changing it to “${dueString}”`))) return render();
   return updateTask(id, { due_string: dueString });
 }
 
 // Picking a calendar date on a recurring task would wipe the recurrence, so warn first.
 async function setDueDate(id, date) {
   const t = taskById(id);
-  if (t?.due?.is_recurring && !confirm(`“${plain(t.content)}” repeats (${t.due.string}). Setting a fixed date removes the repeat. Continue?`)) return render();
+  if (t?.due?.is_recurring && !(await confirmDropRepeat(t, 'Setting a fixed date'))) return render();
   return updateTask(id, date ? { due_date: date } : { due_string: 'no date' });
 }
 
@@ -1343,7 +1343,7 @@ async function reopenTask(id) {
 
 async function deleteTask(id) {
   const t = taskById(id);
-  if (!t || !confirm(`Delete “${plain(t.content)}”? This can't be undone.`)) return;
+  if (!t || !(await askConfirm('Delete this task?', { body: `“${plain(t.content)}” will be deleted from Todoist. This can't be undone.`, ok: 'Delete', danger: true }))) return;
   try {
     await api('DELETE', `/api/tasks/${id}`);
     state.tasks = state.tasks.filter((x) => x.id !== id && x.parent_id !== id);
@@ -1694,8 +1694,8 @@ function openDraw({ drawing = null, taskId = null }) {
   });
 }
 
-function closeDraw(force = false) {
-  if (!force && pad2d.dirty && !confirm('Discard this sketch?')) return;
+async function closeDraw(force = false) {
+  if (!force && pad2d.dirty && !(await askConfirm('Discard this sketch?', { body: 'Your changes haven’t been saved.', ok: 'Discard', cancel: 'Keep drawing', danger: true }))) return;
   $('#draw').classList.add('hidden');
 }
 
@@ -1793,7 +1793,7 @@ async function saveDrawing() {
 
 async function deleteDrawing() {
   const d = pad2d.editing;
-  if (!d || !confirm(`Delete sketch “${d.title}”?`)) return;
+  if (!d || !(await askConfirm('Delete this sketch?', { body: `“${d.title}” will be deleted. This can't be undone.`, ok: 'Delete', danger: true }))) return;
   try {
     await api('DELETE', `/api/drawings/${d.id}`);
     state.drawings = state.drawings.filter((x) => x.id !== d.id);
@@ -1844,9 +1844,9 @@ async function deleteDrawing() {
   $('#draw-size').addEventListener('input', (e) => (pad2d.size = Number(e.target.value)));
   $('#draw-undo').addEventListener('click', drawUndo);
   $('#draw-redo').addEventListener('click', drawRedo);
-  $('#draw-clear').addEventListener('click', () => {
+  $('#draw-clear').addEventListener('click', async () => {
     if (!pad2d.strokes.length && !pad2d.base) return;
-    if (!confirm('Clear the whole canvas?')) return;
+    if (!(await askConfirm('Clear the whole canvas?', { body: 'Everything on it will be erased. This can’t be undone.', ok: 'Clear', danger: true }))) return;
     pad2d.strokes = []; pad2d.redo = []; pad2d.base = null; pad2d.dirty = true;
     rebuildCache(); paint();
   });
@@ -1878,6 +1878,51 @@ function askText(title, { placeholder = '', ok = 'Create' } = {}) {
     input.focus();
   });
 }
+
+// Our own yes/no dialog instead of the browser's confirm() box.
+function askConfirm(title, { body = '', ok = 'OK', cancel = 'Cancel', danger = false, icon = danger ? 'trash' : 'warn' } = {}) {
+  return new Promise((resolve) => {
+    const prev = document.activeElement;
+    const modal = document.createElement('div');
+    modal.className = 'modal ask-modal';
+    modal.innerHTML = `<div class="modal-card glass ask-card confirm-card ${danger ? 'is-danger' : ''}" role="alertdialog" aria-modal="true" aria-labelledby="ask-title">
+      <div class="confirm-icon">${ic(icon)}</div>
+      <h3 id="ask-title">${esc(title)}</h3>
+      ${body ? `<p class="confirm-body">${esc(body)}</p>` : ''}
+      <div class="ask-actions">
+        <button type="button" class="btn" data-ask="no">${esc(cancel)}</button>
+        <button type="button" class="btn primary ${danger ? 'danger-btn' : ''}" data-ask="yes">${esc(ok)}</button>
+      </div>
+    </div>`;
+    const done = (value) => {
+      modal.classList.add('closing');
+      setTimeout(() => modal.remove(), 160);
+      prev?.focus?.({ preventScroll: true });
+      resolve(value);
+    };
+    modal.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-ask]');
+      if (b) done(b.dataset.ask === 'yes');
+      else if (e.target === modal) done(false);
+    });
+    modal.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') { e.preventDefault(); done(false); }
+      if (e.key === 'Tab') { // keep focus on the two buttons
+        e.preventDefault();
+        const [no, yes] = modal.querySelectorAll('[data-ask]');
+        (document.activeElement === yes ? no : yes).focus();
+      }
+    });
+    document.body.appendChild(modal);
+    modal.querySelector(danger ? '[data-ask="no"]' : '[data-ask="yes"]').focus();
+  });
+}
+
+const confirmDropRepeat = (t, change) => askConfirm('Remove the repeat?', {
+  body: `“${plain(t.content)}” repeats ${t.due.string}. ${change} turns it into a one-off task.`,
+  ok: 'Remove repeat', cancel: 'Keep it', icon: 'repeat',
+});
 
 async function createProject() {
   const name = await askText('New project', { placeholder: 'e.g. Work' });
@@ -2212,7 +2257,7 @@ $('#timer-reset').addEventListener('click', resetTimer);
 $('#timer-switch').addEventListener('click', switchTimer);
 $('#timer-task').addEventListener('click', () => timer.taskId && taskById(timer.taskId) && openDetail(timer.taskId));
 $('#disconnect-btn').addEventListener('click', async () => {
-  if (!confirm('Sign out of Capri on this device? You can sign back in with your Todoist token.')) return;
+  if (!(await askConfirm('Sign out of Capri?', { body: 'Only on this device. Sign back in any time with your Todoist token.', ok: 'Sign out', icon: 'external' }))) return;
   await api('POST', '/api/disconnect');
   state.tasks = [];
   showConnect();
