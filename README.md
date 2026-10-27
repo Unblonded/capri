@@ -1,6 +1,6 @@
 # Capri ♑
 
-Steady climb, one task at a time. Named for Capricorn: midnight-sky glass, gold accents, and a hand-drawn ♑ mark. A nicer, more advanced Todoist client that runs locally on Express + Node.js and syncs with your real Todoist account.
+Steady climb, one task at a time. Named for Capricorn: midnight-sky glass, gold accents, and a hand-drawn ♑ mark. A nicer, more advanced Todoist client on Express + Node.js that syncs with your real Todoist account.
 
 ## Run it
 
@@ -9,22 +9,27 @@ npm install
 npm start          # or: npm run dev  (auto-restarts on server changes)
 ```
 
-Open http://localhost:3000 and connect your account:
+Open http://localhost:3300 and sign in:
 
-- **API token (simplest):** Todoist → Settings → Integrations → Developer → copy the API token, paste it into the connect screen. It's saved to `data/token.json` on this machine only. Or put it in `.env` as `TODOIST_TOKEN`.
-- **Sign in with Todoist (OAuth):** create an app at https://developer.todoist.com/appconsole.html, set the redirect URL to `http://localhost:3000/auth/callback`, and put `TODOIST_CLIENT_ID` / `TODOIST_CLIENT_SECRET` in `.env` (copy `.env.example`).
+- **API token (simplest):** Todoist → Settings → Integrations → Developer → copy the API token and paste it into the connect screen.
+- **Sign in with Todoist (OAuth):** create an app at https://developer.todoist.com/appconsole.html, set the redirect URL to `http://localhost:3300/auth/callback` (or your domain's `/auth/callback`), and put `TODOIST_CLIENT_ID` / `TODOIST_CLIENT_SECRET` in `.env` (copy `.env.example`).
 
-The token never reaches the browser — the Express server proxies every call to the Todoist API v1.
+## How sign-in works
+
+There are no Capri accounts or passwords: **your Todoist token is your login.**
+
+- Each browser or desktop app keeps its own token in an `HttpOnly` cookie (marked `Secure` over HTTPS), valid for a year. *Sign out* in the sidebar clears it.
+- The server never stores tokens. It reads the cookie on each request and uses it to call the Todoist API v1 on that person's behalf, so several people can share one Capri server and each only sees their own Todoist.
+- Capri's own data (sketches) is stored per person under `data/users/<hash of token>/`. The folder name is a one-way SHA-256 hash, so the token can't be recovered from it. Your sketches follow your token, so if you regenerate your Todoist token you start with a fresh sketchbook.
 
 ## Hosting it on a domain (e.g. https://capri.kalculator.lol)
 
-Run the server on the computer that stays on, and put your domain in front of it with any HTTPS reverse proxy or tunnel (Caddy, nginx, Cloudflare Tunnel…) pointing at `http://localhost:3000`.
+Run the server on the computer that stays on, and put your domain in front of it with any HTTPS reverse proxy or tunnel (Caddy, nginx, Cloudflare Tunnel…) pointing at `http://localhost:3300`.
 
-1. Copy `.env.example` to `.env` and **set `CAPRI_PASSWORD`**. Without it, anyone who finds the URL can use your Todoist.
-2. `npm install && npm start`
-3. Open the domain, enter the password once (it's remembered for a year), and connect your Todoist.
+1. `npm install && npm start`
+2. Open the domain and sign in with your Todoist token.
 
-Wrong passwords are rate-limited (10 per 15 minutes per IP), and the login cookie is marked `Secure` when served over HTTPS. If your proxy isn't on the same machine or private network, set `TRUST_PROXY` to its address so client IPs and HTTPS are detected correctly.
+Use HTTPS on the domain so the token cookie is always encrypted in transit. If your proxy isn't on the same machine or private network, set `TRUST_PROXY` to its address so HTTPS is detected correctly.
 
 ## Windows desktop app
 

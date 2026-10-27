@@ -25,7 +25,7 @@ function saveConfig(changes) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
-// "capri.example.com" → https://capri.example.com; a bare IP or localhost → http://…:3000 (the server's default port).
+// "capri.example.com" → https://capri.example.com; a bare IP or localhost → http://…:3300 (the server's default port).
 function normalizeUrl(input) {
   let url = String(input || '').trim().replace(/\/+$/, '');
   if (!url) return null;
@@ -35,19 +35,19 @@ function normalizeUrl(input) {
   if (!hasScheme) url = `${local ? 'http' : 'https'}://${url}`;
   try {
     const u = new URL(url);
-    if (local && !hasScheme && !/:\d+$/.test(u.host)) u.port = '3000';
+    if (local && !hasScheme && !/:\d+$/.test(u.host)) u.port = '3300';
     return u.origin;
   } catch {
     return null;
   }
 }
 
-// Any reply from /api/status (including "password required") means a Capri server is there.
+// Any JSON reply from /api/status means a Capri server is there.
 async function probe(url) {
   try {
     const res = await fetch(`${url}/api/status`, { signal: AbortSignal.timeout(5000) });
     const body = await res.json().catch(() => null);
-    return Boolean(body && ('connected' in body || body.needPassword));
+    return Boolean(body && 'connected' in body);
   } catch {
     return false;
   }
@@ -176,7 +176,7 @@ function createTray() {
 
 ipcMain.handle('capri:set-server', async (e, input) => {
   const url = normalizeUrl(input);
-  if (!url) return { ok: false, error: 'That doesn’t look like an address. Try something like 192.168.1.50:3000' };
+  if (!url) return { ok: false, error: 'That doesn’t look like an address. Try something like 192.168.1.50:3300' };
   if (!(await probe(url))) return { ok: false, error: `No Capri server answered at ${url}. Check it’s running and on the same network.` };
   saveConfig({ serverUrl: url });
   openServer();

@@ -7,35 +7,53 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3300;
 // 0.0.0.0 lets other computers (like the Capri desktop app) reach this server; set HOST=127.0.0.1 to keep it local.
 const HOST = process.env.HOST || '0.0.0.0';
-const PASSWORD = process.env.CAPRI_PASSWORD || '';
 const TODOIST_API = 'https://api.todoist.com/api/v1';
 const DATA_DIR = process.env.CAPRI_DATA_DIR || path.join(__dirname, 'data');
-const TOKEN_FILE = path.join(DATA_DIR, 'token.json');
 
-// ---- token storage (single-user, local app) ----
+// ---- users ----
+// There are no Capri accounts or passwords: your Todoist token is your login. Each browser keeps its own
+// token in an HttpOnly cookie, and anything Capri stores (like sketches) lives under a one-way hash of
+// that token, so the raw token is never written to disk.
 
-function loadToken() {
-  if (process.env.TODOIST_TOKEN) return process.env.TODOIST_TOKEN.trim();
-  try {
-    return JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8')).token || null;
-  } catch {
-    return null;
+const TOKEN_COOKIE = 'capri_token';
+const userIdFor = (token) => crypto.createHash('sha256').update(`capri:${token}`).digest('hex').slice(0, 32);
+const userDir = (req) => path.join(DATA_DIR, 'users', req.userId);
+
+function readCookie(req, name) {
+  for (const part of (req.headers.cookie || '').split(/;\s*/)) {
+    const eq = part.indexOf('=');
+    if (eq > 0 && part.slice(0, eq) === name) return decodeURIComponent(part.slice(eq + 1));
+  }
+  return null;
+}
+
+// Over https (your domain) the cookie is never sent unencrypted.
+function setTokenCookie(req, res, token) {
+  res.append('Set-Cookie', `${TOKEN_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${req.secure ? '; Secure' : ''}`);
+}
+
+function clearTokenCookie(res) {
+  res.append('Set-Cookie', `${TOKEN_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+
+// Older versions kept a single token on disk and one shared sketch folder. Hand those sketches to the
+// first person who connects, and stop keeping a plaintext token around.
+const LEGACY_TOKEN = path.join(DATA_DIR, 'token.json');
+const LEGACY_DRAWINGS = path.join(DATA_DIR, 'drawings');
+if (fs.existsSync(LEGACY_TOKEN)) {
+  fs.rmSync(LEGACY_TOKEN, { force: true });
+  console.log('Removed the old shared token file; each person now signs in with their own token.');
+}
+function adoptLegacyDrawings(req) {
+  const target = path.join(userDir(req), 'drawings');
+  if (fs.existsSync(LEGACY_DRAWINGS) && !fs.existsSync(target)) {
+    fs.mkdirSync(userDir(req), { recursive: true });
+    fs.renameSync(LEGACY_DRAWINGS, target);
   }
 }
-
-function saveToken(token) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(TOKEN_FILE, JSON.stringify({ token }), { mode: 0o600 });
-}
-
-function clearToken() {
-  fs.rmSync(TOKEN_FILE, { force: true });
-}
-
-let token = loadToken();
 
 // ---- Todoist client ----
 
@@ -47,7 +65,7 @@ class TodoistError extends Error {
   }
 }
 
-async function td(method, pathname, { query, body, auth = token } = {}) {
+async function td(method, pathname, { query, body, auth } = {}) {
   const url = new URL(TODOIST_API + pathname);
   for (const [k, v] of Object.entries(query || {})) {
     if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
@@ -68,11 +86,11 @@ async function td(method, pathname, { query, body, auth = token } = {}) {
 }
 
 // Follows next_cursor until every page of a list endpoint is collected.
-async function tdAll(pathname, query = {}, key = 'results') {
+async function tdAll(auth, pathname, query = {}, key = 'results') {
   const out = [];
   let cursor;
   do {
-    const page = await td('GET', pathname, { query: { ...query, limit: 200, cursor } });
+    const page = await td('GET', pathname, { auth, query: { ...query, limit: 200, cursor } });
     out.push(...(page[key] || []));
     cursor = page.next_cursor;
   } while (cursor);
@@ -87,49 +105,11 @@ app.set('trust proxy', process.env.TRUST_PROXY ?? 'loopback, linklocal, uniquelo
 // Drawings carry big image payloads and get their own body limit below.
 app.use((req, res, next) => (req.path === '/api/drawings' ? next() : express.json()(req, res, next)));
 
-// ---- optional password (strongly recommended when the server is reachable from the network) ----
-
-const AUTH_COOKIE = 'capri_auth';
-const authValue = PASSWORD && crypto.createHmac('sha256', PASSWORD).update('capri-session').digest('hex');
-const hasAuthCookie = (req) => (req.headers.cookie || '').split(/;\s*/).includes(`${AUTH_COOKIE}=${authValue}`);
-const OPEN_PATHS = new Set(['/login.html', '/styles.css', '/api/login']);
-// At most 10 wrong passwords per IP every 15 minutes.
-const failedLogins = new Map();
-const LOGIN_WINDOW = 15 * 60 * 1000;
-function tooManyAttempts(ip) {
-  const now = Date.now();
-  const recent = (failedLogins.get(ip) || []).filter((t) => now - t < LOGIN_WINDOW);
-  failedLogins.set(ip, recent);
-  return recent.length >= 10;
-}
-
+// Who's asking: the token from their cookie, and the storage id derived from it.
 app.use((req, res, next) => {
-  if (!PASSWORD || hasAuthCookie(req) || OPEN_PATHS.has(req.path)) return next();
-  if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) {
-    return res.status(401).json({ error: 'Password required', needPassword: true });
-  }
-  res.sendFile(path.join(__dirname, 'public', 'login.html'));
-});
-
-app.post('/api/login', async (req, res) => {
-  if (tooManyAttempts(req.ip)) return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
-  const given = Buffer.from(String(req.body?.password || ''));
-  const expected = Buffer.from(PASSWORD);
-  const ok = PASSWORD && given.length === expected.length && crypto.timingSafeEqual(given, expected);
-  if (!ok) {
-    failedLogins.get(req.ip).push(Date.now());
-    await new Promise((r) => setTimeout(r, 600)); // slow down guessing
-    return res.status(401).json({ error: 'Wrong password' });
-  }
-  failedLogins.delete(req.ip);
-  // Over https (your domain) the cookie is never sent unencrypted.
-  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${authValue}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${req.secure ? '; Secure' : ''}`);
-  res.json({ ok: true });
-});
-
-app.post('/api/logout', (req, res) => {
-  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
-  res.json({ ok: true });
+  req.token = readCookie(req, TOKEN_COOKIE);
+  req.userId = req.token ? userIdFor(req.token) : null;
+  next();
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -138,6 +118,7 @@ const wrap = (fn) => (req, res) =>
   fn(req, res).catch((err) => {
     const status = err.status || 500;
     if (status === 401 || status === 403) {
+      clearTokenCookie(res);
       res.status(401).json({ error: 'Todoist rejected the token. Reconnect your account.' });
       return;
     }
@@ -146,16 +127,14 @@ const wrap = (fn) => (req, res) =>
   });
 
 const requireToken = (req, res, next) => {
-  if (!token) return res.status(401).json({ error: 'Not connected to Todoist' });
+  if (!req.token) return res.status(401).json({ error: 'Not connected to Todoist' });
   next();
 };
 
 app.get('/api/status', (req, res) => {
   res.json({
-    connected: Boolean(token),
-    fromEnv: Boolean(process.env.TODOIST_TOKEN),
+    connected: Boolean(req.token),
     oauthAvailable: Boolean(process.env.TODOIST_CLIENT_ID && process.env.TODOIST_CLIENT_SECRET),
-    passwordProtected: Boolean(PASSWORD),
   });
 });
 
@@ -167,15 +146,15 @@ app.post('/api/connect', wrap(async (req, res) => {
   } catch (err) {
     return res.status(400).json({ error: 'That token did not work with Todoist.' });
   }
-  token = candidate;
-  saveToken(token);
+  setTokenCookie(req, res, candidate);
+  req.userId = userIdFor(candidate);
+  adoptLegacyDrawings(req);
   res.json({ connected: true });
 }));
 
 app.post('/api/disconnect', (req, res) => {
-  clearToken();
-  token = process.env.TODOIST_TOKEN || null;
-  res.json({ connected: Boolean(token) });
+  clearTokenCookie(res);
+  res.json({ connected: false });
 });
 
 // OAuth "Sign in with Todoist"
@@ -207,18 +186,19 @@ app.get('/auth/callback', wrap(async (req, res) => {
   });
   const data = await r.json();
   if (!r.ok || !data.access_token) return res.status(400).send('Todoist did not return a token.');
-  token = data.access_token;
-  saveToken(token);
+  setTokenCookie(req, res, data.access_token);
+  req.userId = userIdFor(data.access_token);
+  adoptLegacyDrawings(req);
   res.redirect('/');
 }));
 
 // Everything the UI needs on load, in one round trip.
 app.get('/api/bootstrap', requireToken, wrap(async (req, res) => {
   const [projects, sections, labels, tasks] = await Promise.all([
-    tdAll('/projects'),
-    tdAll('/sections'),
-    tdAll('/labels'),
-    tdAll('/tasks'),
+    tdAll(req.token, '/projects'),
+    tdAll(req.token, '/sections'),
+    tdAll(req.token, '/labels'),
+    tdAll(req.token, '/tasks'),
   ]);
   res.json({ projects, sections, labels, tasks });
 }));
@@ -226,94 +206,92 @@ app.get('/api/bootstrap', requireToken, wrap(async (req, res) => {
 app.get('/api/completed', requireToken, wrap(async (req, res) => {
   const until = req.query.until || new Date().toISOString();
   const since = req.query.since || new Date(Date.now() - 7 * 864e5).toISOString();
-  const items = await tdAll('/tasks/completed/by_completion_date', { since, until }, 'items');
+  const items = await tdAll(req.token, '/tasks/completed/by_completion_date', { since, until }, 'items');
   res.json({ items });
 }));
 
 app.get('/api/filter', requireToken, wrap(async (req, res) => {
-  const tasks = await tdAll('/tasks/filter', { query: req.query.query });
+  const tasks = await tdAll(req.token, '/tasks/filter', { query: req.query.query });
   res.json({ tasks });
 }));
 
 app.post('/api/tasks/quick', requireToken, wrap(async (req, res) => {
-  res.json(await td('POST', '/tasks/quick', { body: { text: req.body.text } }));
+  res.json(await td('POST', '/tasks/quick', { auth: req.token, body: { text: req.body.text } }));
 }));
 
 app.post('/api/tasks', requireToken, wrap(async (req, res) => {
-  res.json(await td('POST', '/tasks', { body: req.body }));
+  res.json(await td('POST', '/tasks', { auth: req.token, body: req.body }));
 }));
 
 app.post('/api/tasks/:id', requireToken, wrap(async (req, res) => {
-  res.json(await td('POST', `/tasks/${encodeURIComponent(req.params.id)}`, { body: req.body }));
+  res.json(await td('POST', `/tasks/${encodeURIComponent(req.params.id)}`, { auth: req.token, body: req.body }));
 }));
 
 // Moving between projects/sections/parents is a separate endpoint from update.
 app.post('/api/tasks/:id/move', requireToken, wrap(async (req, res) => {
-  res.json(await td('POST', `/tasks/${encodeURIComponent(req.params.id)}/move`, { body: req.body }));
+  res.json(await td('POST', `/tasks/${encodeURIComponent(req.params.id)}/move`, { auth: req.token, body: req.body }));
 }));
 
 app.post('/api/tasks/:id/close', requireToken, wrap(async (req, res) => {
-  await td('POST', `/tasks/${encodeURIComponent(req.params.id)}/close`);
+  await td('POST', `/tasks/${encodeURIComponent(req.params.id)}/close`, { auth: req.token });
   res.json({ ok: true });
 }));
 
 app.post('/api/tasks/:id/reopen', requireToken, wrap(async (req, res) => {
-  await td('POST', `/tasks/${encodeURIComponent(req.params.id)}/reopen`);
+  await td('POST', `/tasks/${encodeURIComponent(req.params.id)}/reopen`, { auth: req.token });
   res.json({ ok: true });
 }));
 
 app.delete('/api/tasks/:id', requireToken, wrap(async (req, res) => {
-  await td('DELETE', `/tasks/${encodeURIComponent(req.params.id)}`);
+  await td('DELETE', `/tasks/${encodeURIComponent(req.params.id)}`, { auth: req.token });
   res.json({ ok: true });
 }));
 
 app.post('/api/projects', requireToken, wrap(async (req, res) => {
-  res.json(await td('POST', '/projects', { body: req.body }));
+  res.json(await td('POST', '/projects', { auth: req.token, body: req.body }));
 }));
 
 app.post('/api/sections', requireToken, wrap(async (req, res) => {
-  res.json(await td('POST', '/sections', { body: req.body }));
+  res.json(await td('POST', '/sections', { auth: req.token, body: req.body }));
 }));
 
 app.get('/api/tasks/:id/comments', requireToken, wrap(async (req, res) => {
-  res.json({ comments: await tdAll('/comments', { task_id: req.params.id }) });
+  res.json({ comments: await tdAll(req.token, '/comments', { task_id: req.params.id }) });
 }));
 
 app.post('/api/comments', requireToken, wrap(async (req, res) => {
-  res.json(await td('POST', '/comments', { body: req.body }));
+  res.json(await td('POST', '/comments', { auth: req.token, body: req.body }));
 }));
 
-// ---- drawings (stored locally next to the token) ----
+// ---- drawings (stored per user) ----
 
-const DRAWINGS_DIR = path.join(DATA_DIR, 'drawings');
-const DRAWINGS_INDEX = path.join(DRAWINGS_DIR, 'index.json');
-
-function readDrawings() {
-  try { return JSON.parse(fs.readFileSync(DRAWINGS_INDEX, 'utf8')); } catch { return []; }
-}
-
-function writeDrawings(list) {
-  fs.mkdirSync(DRAWINGS_DIR, { recursive: true });
-  fs.writeFileSync(DRAWINGS_INDEX, JSON.stringify(list, null, 2));
-}
-
-const drawingFile = (id) => path.join(DRAWINGS_DIR, `${id}.png`);
+const drawingsDir = (req) => path.join(userDir(req), 'drawings');
+const drawingFile = (req, id) => path.join(drawingsDir(req), `${id}.png`);
 const validId = (id) => /^[a-f0-9]{16}$/.test(id);
 
-app.get('/api/drawings', (req, res) => res.json({ drawings: readDrawings() }));
+function readDrawings(req) {
+  try { return JSON.parse(fs.readFileSync(path.join(drawingsDir(req), 'index.json'), 'utf8')); } catch { return []; }
+}
 
-app.get('/api/drawings/:id.png', (req, res) => {
+function writeDrawings(req, list) {
+  fs.mkdirSync(drawingsDir(req), { recursive: true });
+  fs.writeFileSync(path.join(drawingsDir(req), 'index.json'), JSON.stringify(list, null, 2));
+}
+
+app.get('/api/drawings', requireToken, (req, res) => res.json({ drawings: readDrawings(req) }));
+
+app.get('/api/drawings/:id.png', requireToken, (req, res) => {
   if (!validId(req.params.id)) return res.status(404).end();
-  res.set('Cache-Control', 'no-cache');
-  res.sendFile(drawingFile(req.params.id), (err) => err && res.status(404).end());
+  res.set('Cache-Control', 'private, no-cache');
+  res.sendFile(drawingFile(req, req.params.id), (err) => err && res.status(404).end());
 });
 
-app.post('/api/drawings', express.json({ limit: '25mb' }), (req, res) => {
+app.post('/api/drawings', requireToken, express.json({ limit: '25mb' }), (req, res) => {
   const { id, title, task_id, image } = req.body || {};
   const match = /^data:image\/png;base64,(.+)$/.exec(image || '');
   if (!match) return res.status(400).json({ error: 'Expected a PNG data URL' });
   if (id && !validId(id)) return res.status(400).json({ error: 'Bad drawing id' });
-  const list = readDrawings();
+  const list = readDrawings(req);
   const now = new Date().toISOString();
   let drawing = id && list.find((d) => d.id === id);
   if (drawing) {
@@ -322,16 +300,16 @@ app.post('/api/drawings', express.json({ limit: '25mb' }), (req, res) => {
     drawing = { id: crypto.randomBytes(8).toString('hex'), title: title || 'Untitled sketch', task_id: task_id || null, created_at: now, updated_at: now };
     list.unshift(drawing);
   }
-  fs.mkdirSync(DRAWINGS_DIR, { recursive: true });
-  fs.writeFileSync(drawingFile(drawing.id), Buffer.from(match[1], 'base64'));
-  writeDrawings(list);
+  fs.mkdirSync(drawingsDir(req), { recursive: true });
+  fs.writeFileSync(drawingFile(req, drawing.id), Buffer.from(match[1], 'base64'));
+  writeDrawings(req, list);
   res.json(drawing);
 });
 
-app.delete('/api/drawings/:id', (req, res) => {
+app.delete('/api/drawings/:id', requireToken, (req, res) => {
   if (!validId(req.params.id)) return res.status(404).end();
-  writeDrawings(readDrawings().filter((d) => d.id !== req.params.id));
-  fs.rmSync(drawingFile(req.params.id), { force: true });
+  writeDrawings(req, readDrawings(req).filter((d) => d.id !== req.params.id));
+  fs.rmSync(drawingFile(req, req.params.id), { force: true });
   res.json({ ok: true });
 });
 
@@ -343,7 +321,6 @@ app.listen(PORT, HOST, () => {
     const lan = Object.values(os.networkInterfaces()).flat()
       .filter((n) => n && n.family === 'IPv4' && !n.internal).map((n) => `http://${n.address}:${PORT}`);
     if (lan.length) console.log(`Other computers can use: ${lan.join('  ')}`);
-    if (!PASSWORD) console.log('WARNING: no CAPRI_PASSWORD set. Anyone who can reach this server (your network, or the internet if it is on a domain) can use your Todoist. Set CAPRI_PASSWORD in .env.');
   }
-  if (!token) console.log('Not connected yet — open the app and paste your Todoist API token.');
+  console.log('Each person signs in with their own Todoist API token.');
 });

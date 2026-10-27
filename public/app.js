@@ -99,11 +99,6 @@ async function api(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  // The server wants its password again (e.g. the cookie expired): reloading shows the login page.
-  if (res.status === 401 && data.needPassword) {
-    location.reload();
-    throw new Error('Password required');
-  }
   if (res.status === 401 && url !== '/api/connect') {
     showConnect();
     throw new Error(data.error || 'Not connected');
@@ -1166,7 +1161,6 @@ function renderPalette() {
     { label: 'Keyboard shortcuts', run: () => $('#help').classList.remove('hidden') },
     { label: 'Sync now', run: () => sync() },
     { label: 'New project', run: createProject },
-    ...(state.passwordProtected ? [{ label: 'Lock Capri (sign out of this server)', run: () => api('POST', '/api/logout').then(() => location.reload()) }] : []),
   ].filter((c) => match(c.label)).map((c) => ({ ...c, kind: 'Command', group: 'Commands' }));
   const projects = [inbox(), ...orderedProjects()].filter(Boolean).filter((p) => match(projectName(p))).map((p) => ({
     label: projectName(p), dot: color(p.color), kind: 'Project', group: 'Projects',
@@ -1558,7 +1552,6 @@ async function boot() {
   applyTheme(store.get('theme', matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   state.sort = store.get('sort', 'smart');
   const status = await api('GET', '/api/status');
-  state.passwordProtected = status.passwordProtected;
   $('#oauth-btn').classList.toggle('hidden', !status.oauthAvailable);
   $('#oauth-or').classList.toggle('hidden', !status.oauthAvailable);
   if (!status.connected) return showConnect();
@@ -1769,10 +1762,10 @@ $('#timer-reset').addEventListener('click', resetTimer);
 $('#timer-switch').addEventListener('click', switchTimer);
 $('#timer-task').addEventListener('click', () => timer.taskId && taskById(timer.taskId) && openDetail(timer.taskId));
 $('#disconnect-btn').addEventListener('click', async () => {
-  if (!confirm('Disconnect your Todoist account from this app?')) return;
-  const { connected } = await api('POST', '/api/disconnect');
-  if (connected) toast('Still connected via TODOIST_TOKEN in .env');
-  else showConnect();
+  if (!confirm('Sign out of Capri on this device? You can sign back in with your Todoist token.')) return;
+  await api('POST', '/api/disconnect');
+  state.tasks = [];
+  showConnect();
 });
 
 document.addEventListener('keydown', (e) => {
