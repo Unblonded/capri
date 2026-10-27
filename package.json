@@ -1,7 +1,7 @@
 {
   "name": "capri",
-  "version": "0.4.1",
-  "description": "Capri — a liquid-glass Todoist client running on Express",
+  "version": "0.4.2",
+  "description": "Capri \u2014 a liquid-glass Todoist client running on Express",
   "main": "desktop/main.cjs",
   "type": "module",
   "scripts": {
@@ -13,7 +13,8 @@
     "dist:win": "electron-builder --win nsis portable --x64",
     "update": "node scripts/update.mjs",
     "serve": "node --watch server.js",
-    "build:desktop": "electron-builder --win nsis --publish never"
+    "build:desktop": "electron-builder --win nsis --publish never",
+    "dist:mac": "electron-builder --mac --publish never"
   },
   "engines": {
     "node": ">=18"
@@ -57,14 +58,38 @@
       "artifactName": "Capri-Portable-${version}.${ext}"
     },
     "mac": {
-      "icon": "desktop/icons/icon.png"
+      "icon": "desktop/icons/icon.png",
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Capri-${version}-mac-${arch}.${ext}"
     },
     "publish": [
       {
         "provider": "generic",
         "url": "https://capri.kalculator.lol/updates"
       }
-    ]
+    ],
+    "npmRebuild": false,
+    "dmg": {
+      "artifactName": "Capri-${version}-mac-${arch}.${ext}"
+    },
+    "afterSign": "scripts/adhoc-sign.cjs"
   },
   "author": "Unblonded"
 }

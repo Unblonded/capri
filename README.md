@@ -78,6 +78,12 @@ No App Store or developer account needed. Open your Capri address (e.g. https://
 
 (A Shortcuts *Open URLs* action always opens a Safari tab with the browser bars, so use the home-screen icon for full screen.)
 
+## Mac app
+
+`npm run dist:mac` builds native apps for Apple Silicon and Intel: `dist/Capri-<version>-mac-arm64.dmg` and `…-mac-x64.dmg` (plus zips). Same features as the Windows app: menu-bar icon, ⌘⇧Space quick add, *Open at login*, always on top, clear cache.
+
+The apps are ad-hoc signed, not notarised (that needs a paid Apple Developer account), so the first time: drag Capri to Applications, then **right-click → Open → Open**. If macOS still says it's damaged, run `xattr -cr /Applications/Capri.app`. Mac copies don't update themselves; install the new dmg to update.
+
 ## Features
 
 - **Views:** Dashboard, Inbox, Today (with overdue + one-click "reschedule to today"), Upcoming (14 days), Focus (all P1/P2), Completed (last 7 days, with reopen), projects, labels, search
@@ -87,7 +93,7 @@ No App Store or developer account needed. Open your Capri address (e.g. https://
 - **On phones:** swipe a task right to complete it, left to delete it (with a few seconds to undo); no accidental zooming when tapping fields
 - **Command palette** (⌘K) for tasks, projects, labels and commands
 - **Dashboard:** overdue/today/week counts, completed-per-day chart, open tasks by project
-- Undo on complete, mobile layout, auto-sync when you come back to the tab
+- Undo on complete, mobile layout, auto-sync: changes made in Todoist or on another device show up within ~20 seconds (and right away when you come back to Capri), without pressing Sync
 - **Three themes:** Light, Dark (Capricorn gold on midnight) and **Capri**, a neon theme of hot-red glitter shards, acid green and violet glitch edges on near-black. Click the theme button to cycle, or ⌘K → *Theme: …*
 
 ### New in this version

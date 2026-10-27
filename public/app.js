@@ -92,12 +92,23 @@ const store = {
 
 // ---------- API ----------
 
+// Writes in flight (and a running count of them), so a background sync can't paint over a change
+// that hasn't reached Todoist yet.
+const writes = { pending: 0, seq: 0 };
+
 async function api(method, url, body) {
-  const res = await fetch(url, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const write = method !== 'GET';
+  if (write) { writes.pending++; writes.seq++; }
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } finally {
+    if (write) writes.pending--;
+  }
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && url !== '/api/connect') {
     showConnect();
@@ -107,9 +118,17 @@ async function api(method, url, body) {
   return data;
 }
 
-async function sync({ quiet = false } = {}) {
+let lastSyncFingerprint = '';
+async function sync({ quiet = false, auto = false } = {}) {
+  const seq = writes.seq;
   try {
     const [data, { drawings }] = await Promise.all([api('GET', '/api/bootstrap'), api('GET', '/api/drawings')]);
+    // You changed something while this was loading; the next sync will include it.
+    if (auto && (writes.pending || writes.seq !== seq)) return;
+    // Nothing changed since last time: don't redraw under the user.
+    const fingerprint = JSON.stringify([data, drawings]);
+    if (auto && fingerprint === lastSyncFingerprint) { state.lastSync = Date.now(); return; }
+    lastSyncFingerprint = fingerprint;
     data.tasks = data.tasks.filter((x) => !pendingDeletes.has(x.id) && !pendingDeletes.has(x.parent_id));
     Object.assign(state, data, { drawings, lastSync: Date.now() });
     loadDoneToday();
@@ -613,7 +632,7 @@ function render() {
   renderBulk();
 }
 
-// One glass pill slides (with a little liquid stretch) to whichever sidebar item is active.
+// One glass pill glides to whichever sidebar item is active.
 let navPillAt = null;
 function moveNavPill() {
   const sidebar = $('#sidebar');
@@ -624,27 +643,32 @@ function moveNavPill() {
     sidebar.prepend(pill);
   }
   const item = $('.nav-item.active', sidebar);
-  sidebar.classList.toggle('has-pill', Boolean(item));
-  if (!item) { pill.style.opacity = '0'; navPillAt = null; return; }
+  const r = item?.getBoundingClientRect();
+  // No active item, or it's inside a collapsed section: hide the pill and let the item style itself.
+  if (!r?.height) {
+    sidebar.classList.remove('has-pill');
+    pill.style.opacity = '0';
+    navPillAt = null;
+    return;
+  }
   const sr = sidebar.getBoundingClientRect();
-  const r = item.getBoundingClientRect();
-  if (!r.height) return; // sidebar not laid out yet (hidden)
-  const top = r.top - sr.top + sidebar.scrollTop;
-  const left = r.left - sr.left;
+  const top = Math.round(r.top - sr.top + sidebar.scrollTop - sidebar.clientTop);
+  const left = Math.round(r.left - sr.left - sidebar.clientLeft);
+  // Background re-renders land on the same spot; only a real move animates.
+  if (navPillAt && navPillAt.top === top && navPillAt.left === left && navPillAt.w === r.width && navPillAt.h === r.height) return;
   const first = navPillAt === null;
-  const jumped = !first && Math.abs(top - navPillAt) > 1;
   pill.classList.toggle('instant', first);
-  pill.style.opacity = '1';
   pill.style.width = `${r.width}px`;
   pill.style.height = `${r.height}px`;
   pill.style.transform = `translate(${left}px, ${top}px)`;
-  if (jumped) {
-    // Stretch toward the direction of travel, then settle.
-    pill.classList.remove('jump-down', 'jump-up');
-    void pill.offsetWidth;
-    pill.classList.add(top > navPillAt ? 'jump-down' : 'jump-up');
+  pill.style.opacity = '1';
+  sidebar.classList.add('has-pill');
+  if (!first && Math.abs(top - navPillAt.top) > 4) {
+    pill.classList.remove('jump');
+    void pill.offsetWidth; // restart the stretch
+    pill.classList.add('jump');
   }
-  navPillAt = top;
+  navPillAt = { top, left, w: r.width, h: r.height };
 }
 addEventListener('resize', () => moveNavPill());
 document.fonts?.ready.then(() => moveNavPill());
@@ -2155,10 +2179,25 @@ document.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('hashchange', applyHash);
-// Pull fresh data when coming back to the tab, at most every 30s.
-window.addEventListener('focus', () => {
-  if (!$('#app').classList.contains('hidden') && Date.now() - state.lastSync > 30000) sync({ quiet: true });
-});
+// ---------- auto-sync ----------
+// Picks up changes made elsewhere (the Todoist app, another device) without pressing Sync:
+// every 20s while Capri is on screen, and straight away when you come back to it.
+const AUTO_SYNC_MS = 20000;
+let autoSyncing = false;
+async function autoSync(minGap = AUTO_SYNC_MS) {
+  if (autoSyncing || document.hidden || $('#app').classList.contains('hidden')) return;
+  if (Date.now() - state.lastSync < minGap) return;
+  // Not mid-gesture or mid-drag, and not while your own changes are still saving.
+  if (swipe || $('.task.dragging') || writes.pending || ddOpen) return;
+  const a = document.activeElement;
+  if (a?.matches('input, textarea') && !$('#detail').contains(a)) return; // typing somewhere a redraw would clear
+  autoSyncing = true;
+  try { await sync({ quiet: true, auto: true }); } finally { autoSyncing = false; }
+}
+setInterval(() => autoSync(), 5000);
+document.addEventListener('visibilitychange', () => autoSync(5000));
+window.addEventListener('focus', () => autoSync(5000));
+window.addEventListener('online', () => autoSync(0));
 
 $$('[data-ic]').forEach((el) => { el.outerHTML = ic(el.dataset.ic); });
 renderTimer();

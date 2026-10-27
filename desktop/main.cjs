@@ -6,6 +6,7 @@ const path = require('node:path');
 const desktopPin = require('./pin.cjs');
 
 const QUICK_ADD_SHORTCUT = 'CommandOrControl+Shift+Space';
+const IS_MAC = process.platform === 'darwin';
 const DEFAULT_SERVER = 'https://capri.kalculator.lol';
 const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
 const ICON = path.join(__dirname, 'icons', 'icon.png');
@@ -78,15 +79,18 @@ function createWindow() {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b0d18' : '#eef0f7',
     alwaysOnTop: Boolean(config.alwaysOnTop),
     autoHideMenuBar: true,
-    // Hide the native title bar; Windows still draws its min/max/close buttons over the page.
+    // Hide the native title bar. Windows still draws its min/max/close buttons over the page;
+    // macOS keeps its traffic lights, set into the same strip.
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#00000000', symbolColor: '#8a8fa8', height: 34 },
+    ...(IS_MAC
+      ? { trafficLightPosition: { x: 14, y: 11 } }
+      : { titleBarOverlay: { color: '#00000000', symbolColor: '#8a8fa8', height: 34 } }),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   });
   win.setMenuBarVisibility(false);
 
   // Pinned to the desktop it shows at startup too, like a widget.
-  if (!process.argv.includes('--hidden') || config.pinned) win.once('ready-to-show', () => win.show());
+  if (!startedHidden() || config.pinned) win.once('ready-to-show', () => win.show());
   if (config.pinned) win.once('show', () => setPinned(true));
 
   // Leave room for the window buttons and make the top strip draggable.
@@ -144,6 +148,13 @@ function createWindow() {
   openServer();
 }
 
+// Launched at login: stay in the tray (Windows passes --hidden; macOS tells us it opened it).
+function startedHidden() {
+  return process.argv.includes('--hidden') || (IS_MAC && app.getLoginItemSettings().wasOpenedAtLogin);
+}
+
+const setOpenAtLogin = (openAtLogin) => app.setLoginItemSettings({ openAtLogin, args: ['--hidden'] });
+
 function showWindow() {
   if (config.pinned) raised = true;
   if (win.isMinimized()) win.restore();
@@ -196,8 +207,8 @@ function buildTrayMenu() {
       click: (item) => { win.setAlwaysOnTop(item.checked); saveConfig({ alwaysOnTop: item.checked }); },
     },
     {
-      label: 'Start with Windows', type: 'checkbox', checked: login.openAtLogin,
-      click: (item) => { app.setLoginItemSettings({ openAtLogin: item.checked, args: ['--hidden'] }); },
+      label: IS_MAC ? 'Open at login' : 'Start with Windows', type: 'checkbox', checked: login.openAtLogin,
+      click: (item) => setOpenAtLogin(item.checked),
     },
     { label: 'Change server…', click: () => { showWindow(); showSetup(); } },
     { label: 'Reload', click: openServer },
@@ -274,7 +285,7 @@ if (!app.requestSingleInstanceLock()) {
     setupUpdates();
     // First launch: start with Windows unless the user turns it off from the tray.
     if (!config.loginItemSet) {
-      app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'] });
+      setOpenAtLogin(true);
       saveConfig({ loginItemSet: true });
     }
   });

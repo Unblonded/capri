@@ -852,14 +852,13 @@ html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -we
   position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; opacity: 0;
   border-radius: 12px; background: var(--active); border: 1px solid var(--glass-border);
   box-shadow: 0 4px 14px var(--glass-shade), inset 0 1px 0 var(--glass-edge);
-  transition: transform .6s var(--spring), width .4s var(--ease-out), height .4s var(--ease-out), opacity .2s;
+  /* Glides with only a hint of settle, rather than a full spring. */
+  transition: transform .42s cubic-bezier(.25, 1.1, .4, 1), width .3s var(--ease-out), height .3s var(--ease-out), opacity .2s;
+  will-change: transform;
 }
 .nav-pill.instant { transition: none; }
-.nav-pill.jump-down { animation: pill-stretch-down .6s var(--ease-out); }
-.nav-pill.jump-up { animation: pill-stretch-up .6s var(--ease-out); }
-/* The pill's own transform moves it, so the stretch rides on scale via the individual property. */
-@keyframes pill-stretch-down { 0% { scale: 1 1; transform-origin: top; } 30% { scale: .94 1.35; } 65% { scale: 1.02 .94; } 100% { scale: 1 1; } }
-@keyframes pill-stretch-up { 0% { scale: 1 1; } 30% { scale: .94 1.35; } 65% { scale: 1.02 .94; } 100% { scale: 1 1; } }
+.nav-pill.jump { animation: pill-stretch .42s var(--ease-out); }
+@keyframes pill-stretch { 35% { scale: .98 1.12; } }
 .sidebar.has-pill .nav-item.active { background: transparent; border-color: transparent; box-shadow: none; }
 :root[data-theme="capri"] .nav-pill { box-shadow: inset 3px 0 0 var(--accent), 0 2px 10px var(--glass-shade); }
 :root[data-theme="capri"] .sidebar.has-pill .nav-item.active { box-shadow: none; }
