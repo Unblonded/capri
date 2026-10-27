@@ -78,7 +78,8 @@ This produces `dist/Capri-Setup-<version>.exe` (installer) and `dist/Capri-Porta
 - **Task drawer:** edit name, description, due (natural language), project/section, priority, labels, sub-tasks, comments, delete
 - **Command palette** (⌘K) for tasks, projects, labels and commands
 - **Dashboard:** overdue/today/week counts, completed-per-day chart, open tasks by project
-- Undo on complete, light/dark theme, mobile layout, auto-sync when you come back to the tab
+- Undo on complete, mobile layout, auto-sync when you come back to the tab
+- **Three themes:** Light, Dark (Capricorn gold on midnight) and **Capri**, a neon theme of hot-red glitter shards, acid green and violet glitch edges on near-black. Click the theme button to cycle, or ⌘K → *Theme: …*
 
 ### New in this version
 

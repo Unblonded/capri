@@ -579,3 +579,128 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 :root[data-theme="dark"] .backdrop::after { opacity: .8; }
 @keyframes twinkle { from { filter: brightness(.6); } to { filter: brightness(1.4); } }
 @media (prefers-reduced-motion: reduce) { .backdrop::after { animation: none; } }
+
+/* ---------- themed dropdowns (replace native <select>) ---------- */
+select[data-dd] { display: none !important; } /* .btn styles would otherwise override [hidden] */
+.dd-btn { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 100%; }
+.dd-btn .dd-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-btn .ic { width: 13px; height: 13px; flex-shrink: 0; opacity: .7; transition: transform .15s; }
+.dd-btn[aria-expanded="true"] .ic { transform: rotate(180deg); }
+.dd-field {
+  width: 100%; padding: 9px 12px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-inset);
+  color: var(--text); text-align: left; cursor: pointer; transition: border-color .15s, box-shadow .15s;
+}
+.dd-field:hover { background: var(--hover); }
+.dd-field:focus-visible, .dd-field[aria-expanded="true"] { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.dd-menu {
+  position: fixed; z-index: 90; overflow-y: auto; padding: 6px; border-radius: 16px; max-width: min(420px, calc(100vw - 20px));
+  background: color-mix(in srgb, var(--menu-bg) 94%, transparent); color: var(--text);
+  border: 1px solid var(--glass-border); box-shadow: var(--shadow), inset 0 1px 0 var(--glass-edge);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); animation: rise .14s ease;
+}
+.dd-opt {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-radius: 10px;
+  cursor: pointer; font-size: 13px; white-space: nowrap;
+}
+.dd-opt .dd-text { overflow: hidden; text-overflow: ellipsis; }
+.dd-opt.hl { background: var(--active); }
+.dd-opt.on { color: var(--accent); font-weight: 600; }
+.dd-opt .ic { width: 14px; height: 14px; flex-shrink: 0; stroke-width: 2.4; }
+
+/* ============ Capri theme: neon red glitter, acid green and violet over near-black, with shattered shards ============ */
+:root[data-theme="capri"] {
+  --bg: #0c0d12;
+  --glass: rgba(14, 14, 20, 0.5);
+  --glass-strong: rgba(18, 18, 26, 0.86);
+  --blur: blur(12px) saturate(160%);
+  --glass-inset: rgba(255, 255, 255, 0.04);
+  --glass-border: rgba(255, 46, 92, 0.22);
+  --glass-edge: rgba(255, 92, 138, 0.38);
+  --glass-shade: rgba(0, 0, 0, 0.45);
+  --hover: rgba(255, 46, 92, 0.08);
+  --active: rgba(255, 46, 92, 0.16);
+  --line: rgba(255, 255, 255, 0.07);
+  --text: #f6f0f6;
+  --muted: #a99db4;
+  --faint: #6b6177;
+  --accent: #ff2e5c;
+  --accent-2: #ff5f8f;
+  --accent-soft: rgba(255, 46, 92, 0.2);
+  --on-accent: #16030a;
+  --menu-bg: #14141c;
+  --neon-green: #2bff74;
+  --violet: #8b3dff;
+  --p1: #ff4766;
+  --p2: #ffb21f;
+  --p3: #6f8cff;
+  --p4: #6b6177;
+  --green: #2bff74;
+  --deadline: #a65bff;
+  --shadow: 0 24px 70px rgba(0, 0, 0, 0.65), 0 2px 10px rgba(0, 0, 0, 0.4);
+  --night: linear-gradient(135deg, #1a1018, #08080c);
+  color-scheme: dark;
+}
+
+/* Shattered shards instead of soft blobs: each one is a jagged neon-red glitter shard with a violet edge offset behind it. */
+:root[data-theme="capri"] .blob { filter: none; opacity: 1; border-radius: 0; background: none; animation: shard-drift 26s ease-in-out infinite alternate; }
+:root[data-theme="capri"] .blob::before, :root[data-theme="capri"] .blob::after { content: ""; position: absolute; inset: 0; }
+:root[data-theme="capri"] .blob::before { background: var(--violet); transform: translate(10px, 8px); opacity: .55; }
+:root[data-theme="capri"] .blob::after {
+  background:
+    radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.9) 50%, transparent), radial-gradient(1px 1px at 70% 60%, rgba(255,255,255,.8) 50%, transparent),
+    radial-gradient(1px 1px at 45% 80%, rgba(255,255,255,.7) 50%, transparent), radial-gradient(1px 1px at 85% 20%, rgba(255,255,255,.85) 50%, transparent),
+    linear-gradient(160deg, #ff2e5c, #e0103f 70%);
+  background-size: 14px 14px, 18px 18px, 22px 22px, 26px 26px, 100% 100%;
+}
+:root[data-theme="capri"] .b1::before, :root[data-theme="capri"] .b1::after { clip-path: polygon(8% 0, 46% 14%, 38% 26%, 70% 18%, 62% 40%, 100% 30%, 74% 58%, 90% 72%, 52% 66%, 40% 100%, 30% 70%, 0 84%, 18% 52%, 2% 36%, 24% 30%); }
+:root[data-theme="capri"] .b1 { width: 38vw; height: 44vw; top: -8vw; left: -6vw; opacity: .7; }
+:root[data-theme="capri"] .b2::before, :root[data-theme="capri"] .b2::after { clip-path: polygon(30% 0, 52% 22%, 46% 34%, 100% 12%, 66% 48%, 82% 56%, 40% 100%, 50% 62%, 0 78%, 34% 44%, 12% 38%); }
+:root[data-theme="capri"] .b2 { width: 34vw; height: 38vw; bottom: -6vw; right: -4vw; opacity: .65; }
+/* One sliver of acid green, like a glitch splinter. */
+:root[data-theme="capri"] .b3::before, :root[data-theme="capri"] .b3::after { clip-path: polygon(40% 0, 52% 0, 34% 40%, 58% 38%, 22% 100%, 30% 52%, 8% 54%); }
+:root[data-theme="capri"] .b3 { width: 12vw; height: 34vw; top: 30%; left: 20%; opacity: .8; }
+:root[data-theme="capri"] .b3::after { background: linear-gradient(170deg, var(--neon-green), #10c94f); }
+:root[data-theme="capri"] .b4::before, :root[data-theme="capri"] .b4::after { clip-path: polygon(0 20%, 60% 0, 44% 30%, 100% 34%, 50% 52%, 70% 100%, 26% 58%, 10% 70%); }
+:root[data-theme="capri"] .b4 { width: 20vw; height: 18vw; top: 10%; right: 16%; opacity: .5; }
+@keyframes shard-drift { 0% { transform: translate(0, 0) rotate(0deg); } 100% { transform: translate(2vw, 1.5vh) rotate(3deg); } }
+
+/* Glitter dust over everything instead of a calm star field. */
+:root[data-theme="capri"] .backdrop::before {
+  opacity: .5;
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, #ff5f8f 60%, transparent), radial-gradient(1px 1px at 27% 72%, #fff 60%, transparent),
+    radial-gradient(1.4px 1.4px at 41% 33%, #ff2e5c 60%, transparent), radial-gradient(1px 1px at 58% 12%, #fff 60%, transparent),
+    radial-gradient(1px 1px at 66% 58%, #2bff74 60%, transparent), radial-gradient(1.6px 1.6px at 79% 26%, #ff5f8f 60%, transparent),
+    radial-gradient(1px 1px at 88% 81%, #fff 60%, transparent), radial-gradient(1px 1px at 7% 88%, #8b3dff 60%, transparent),
+    radial-gradient(1.2px 1.2px at 35% 92%, #ff2e5c 60%, transparent), radial-gradient(1px 1px at 93% 47%, #fff 60%, transparent);
+  background-size: 420px 420px;
+}
+:root[data-theme="capri"] .backdrop::after { opacity: .7; }
+
+/* Neon details */
+:root[data-theme="capri"] .glass { box-shadow: var(--shadow), inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 rgba(139, 61, 255, .25); }
+:root[data-theme="capri"] .wordmark {
+  background: linear-gradient(100deg, #ff5f8f, #ff2e5c 55%, #ff2e5c);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(1.5px 1.5px 0 rgba(139, 61, 255, .9));
+}
+:root[data-theme="capri"] .brand .logo {
+  color: var(--accent); background: #0a0a0f;
+  box-shadow: inset 0 0 0 1px rgba(255, 46, 92, .45), 3px 3px 0 rgba(139, 61, 255, .6);
+}
+:root[data-theme="capri"] .brand .logo .ic { filter: drop-shadow(1px 1px 0 var(--violet)); }
+:root[data-theme="capri"] .btn.primary, :root[data-theme="capri"] .plus-badge {
+  background:
+    radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.75) 50%, transparent), radial-gradient(1px 1px at 70% 65%, rgba(255,255,255,.6) 50%, transparent),
+    linear-gradient(135deg, #ff2e5c, #ff5f8f);
+  background-size: 9px 9px, 13px 13px, 100% 100%;
+  color: #fff; box-shadow: 3px 3px 0 var(--violet), 0 6px 22px rgba(255, 46, 92, .35);
+}
+:root[data-theme="capri"] .nav-item.active { box-shadow: inset 3px 0 0 var(--accent), 0 2px 10px var(--glass-shade); }
+:root[data-theme="capri"] .task.selected { box-shadow: inset 3px 0 0 var(--neon-green), 0 4px 16px var(--glass-shade); }
+:root[data-theme="capri"] .check.checked { box-shadow: 0 0 10px rgba(43, 255, 116, .6); color: #04140a; }
+:root[data-theme="capri"] .group-head { background: linear-gradient(rgba(16, 16, 23, .92), transparent); }
+:root[data-theme="capri"] .bar { background: linear-gradient(180deg, #ff5f8f, #ff2e5c); box-shadow: 3px 0 0 rgba(139, 61, 255, .55); }
+:root[data-theme="capri"] .ring circle[stroke^="url"] { filter: drop-shadow(0 0 4px rgba(255, 46, 92, .6)); }
+:root[data-theme="capri"] ::selection { background: rgba(43, 255, 116, .3); }
+:root[data-theme="capri"] .dd-opt.on, :root[data-theme="capri"] .add-task-btn { color: var(--accent); }

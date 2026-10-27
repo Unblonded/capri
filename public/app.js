@@ -356,6 +356,134 @@ function toast(msg, action) {
   setTimeout(() => el.remove(), action ? 6000 : 2600);
 }
 
+// ---------- themed dropdowns ----------
+// Native <select> menus are drawn by the OS (white on Windows, whatever the theme), so every select is
+// swapped for a glass button + menu. The real <select> stays in the DOM, hidden, and still fires
+// 'change', so the rest of the app keeps working with plain selects.
+
+let ddOpen = null; // { sel, menu, btn, index }
+
+function syncDropdown(sel) {
+  const btn = sel.nextElementSibling;
+  if (!btn?.classList.contains('dd-btn')) return;
+  const text = sel.options[sel.selectedIndex]?.textContent || '';
+  const label = btn.querySelector('.dd-label');
+  // Only touch the DOM when something changed, or the MutationObserver below would loop forever.
+  if (label.textContent !== text) label.textContent = text;
+  if (btn.title !== (sel.title || '')) btn.title = sel.title || '';
+}
+
+function closeDropdown() {
+  if (!ddOpen) return;
+  ddOpen.menu.remove();
+  ddOpen.btn.setAttribute('aria-expanded', 'false');
+  ddOpen = null;
+}
+
+function chooseDropdown(i) {
+  const { sel, btn } = ddOpen;
+  closeDropdown();
+  btn.focus({ preventScroll: true });
+  if (sel.selectedIndex === i) return;
+  sel.selectedIndex = i;
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+  syncDropdown(sel); // handlers may reset the value (e.g. bulk priority), so sync afterwards
+}
+
+function highlightDropdown(i) {
+  const items = $$('.dd-opt', ddOpen.menu);
+  ddOpen.index = Math.max(0, Math.min(items.length - 1, i));
+  items.forEach((el, n) => el.classList.toggle('hl', n === ddOpen.index));
+  items[ddOpen.index]?.scrollIntoView({ block: 'nearest' });
+}
+
+function openDropdown(sel, btn) {
+  closeDropdown();
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu';
+  menu.setAttribute('role', 'listbox');
+  menu.innerHTML = [...sel.options].map((o, i) =>
+    `<div class="dd-opt ${i === sel.selectedIndex ? 'on' : ''}" role="option" data-dd="${i}">
+      <span class="dd-text">${esc(o.textContent)}</span>${i === sel.selectedIndex ? ic('check') : ''}</div>`).join('');
+  document.body.appendChild(menu);
+  const r = btn.getBoundingClientRect();
+  menu.style.minWidth = `${Math.max(r.width, 180)}px`;
+  const below = innerHeight - r.bottom - 12;
+  const h = Math.min(menu.scrollHeight, 340);
+  menu.style.maxHeight = `${Math.min(340, Math.max(below, r.top - 12))}px`;
+  menu.style.top = `${below >= h || below > r.top ? r.bottom + 6 : r.top - 6 - Math.min(h, r.top - 12)}px`;
+  menu.style.left = `${Math.min(r.left, innerWidth - menu.offsetWidth - 10)}px`;
+  btn.setAttribute('aria-expanded', 'true');
+  ddOpen = { sel, menu, btn, index: sel.selectedIndex };
+  highlightDropdown(sel.selectedIndex);
+}
+
+function enhanceSelects() {
+  for (const sel of $$('select')) {
+    if (!sel.dataset.dd) {
+      sel.dataset.dd = '1';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `dd-btn ${sel.classList.contains('btn') ? sel.className : 'dd-field'}`;
+      btn.setAttribute('aria-haspopup', 'listbox');
+      btn.innerHTML = `<span class="dd-label"></span>${ic('chevron')}`;
+      sel.after(btn);
+      sel.hidden = true;
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        ddOpen?.sel === sel ? closeDropdown() : openDropdown(sel, btn);
+      });
+    }
+    syncDropdown(sel);
+  }
+}
+
+// Enhance selects whenever the app re-renders some HTML.
+let ddQueued = false;
+new MutationObserver(() => {
+  if (ddQueued) return;
+  ddQueued = true;
+  queueMicrotask(() => { ddQueued = false; enhanceSelects(); });
+}).observe(document.body, { childList: true, subtree: true });
+
+document.addEventListener('pointerdown', (e) => {
+  if (!ddOpen) return;
+  const opt = e.target.closest('.dd-opt');
+  if (opt && ddOpen.menu.contains(opt)) { e.preventDefault(); return chooseDropdown(Number(opt.dataset.dd)); }
+  if (!ddOpen.menu.contains(e.target) && !ddOpen.btn.contains(e.target)) closeDropdown();
+}, true);
+document.addEventListener('mousemove', (e) => {
+  const opt = ddOpen && e.target.closest?.('.dd-opt');
+  if (opt) highlightDropdown(Number(opt.dataset.dd));
+});
+// Keyboard: arrows/Enter/Escape while open, and arrows/Enter/Space to open from the button.
+document.addEventListener('keydown', (e) => {
+  if (ddOpen) {
+    const keys = {
+      ArrowDown: () => highlightDropdown(ddOpen.index + 1),
+      ArrowUp: () => highlightDropdown(ddOpen.index - 1),
+      Home: () => highlightDropdown(0),
+      End: () => highlightDropdown(ddOpen.sel.options.length - 1),
+      Enter: () => chooseDropdown(ddOpen.index),
+      ' ': () => chooseDropdown(ddOpen.index),
+      Escape: () => { const b = ddOpen.btn; closeDropdown(); b.focus(); },
+      Tab: () => closeDropdown(),
+    };
+    if (keys[e.key]) { if (e.key !== 'Tab') e.preventDefault(); e.stopImmediatePropagation(); keys[e.key](); }
+    else e.stopImmediatePropagation();
+    return;
+  }
+  const btn = e.target.closest?.('.dd-btn');
+  if (btn && ['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    openDropdown(btn.previousElementSibling, btn);
+  }
+}, true);
+window.addEventListener('resize', closeDropdown);
+document.addEventListener('scroll', (e) => { if (ddOpen && !ddOpen.menu.contains(e.target)) closeDropdown(); }, true);
+
 // ---------- routing ----------
 
 function setView(view) {
@@ -1157,7 +1285,9 @@ function renderPalette() {
     { label: 'Go to Focus', run: () => setView({ type: 'focus' }) },
     { label: 'Go to Sketches', run: () => setView({ type: 'sketches' }) },
     { label: 'Go to Completed', run: () => setView({ type: 'completed' }) },
-    { label: 'Toggle dark mode', run: toggleTheme },
+    { label: 'Theme: Light', run: () => applyTheme('light') },
+    { label: 'Theme: Dark', run: () => applyTheme('dark') },
+    { label: 'Theme: Capri (neon)', run: () => applyTheme('capri') },
     { label: 'Keyboard shortcuts', run: () => $('#help').classList.remove('hidden') },
     { label: 'Sync now', run: () => sync() },
     { label: 'New project', run: createProject },
@@ -1523,12 +1653,21 @@ function togglePick(id) {
   renderBulk();
 }
 
+// Light and Dark are the Capricorn looks (stone / midnight sky + gold); Capri is the neon one.
+const THEMES = { light: 'Light', dark: 'Dark', capri: 'Capri' };
+
 function applyTheme(theme) {
+  if (!THEMES[theme]) theme = 'dark';
   document.documentElement.dataset.theme = theme;
   store.set('theme', theme);
+  const btn = $('#theme-btn');
+  if (btn) btn.title = `Theme: ${THEMES[theme]} (click to switch)`;
 }
 function toggleTheme() {
-  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+  const order = Object.keys(THEMES);
+  const next = order[(order.indexOf(document.documentElement.dataset.theme) + 1) % order.length];
+  applyTheme(next);
+  toast(`Theme: ${THEMES[next]}`);
 }
 
 function moveSelection(delta) {
