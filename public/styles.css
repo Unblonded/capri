@@ -1077,23 +1077,23 @@ img, svg { -webkit-user-drag: none; }
 /* ---- tap feedback ---- */
 /* Uses the separate `scale` property so it stacks with each control's own transforms (see app.js). */
 .tap-press { scale: .95; filter: brightness(1.12); transition: scale .1s ease-out, filter .1s ease-out; }
-.tap-release { animation: tap-release .38s cubic-bezier(.34, 1.56, .64, 1); }
+.tap-release { animation: tap-release .28s cubic-bezier(.22, 1, .36, 1); }
 @keyframes tap-release {
-  0% { scale: .95; filter: brightness(1.12); }
-  55% { scale: 1.03; }
-  100% { scale: 1; filter: none; }
+  from { scale: .95; filter: brightness(1.12); }
+  to { scale: 1; filter: none; }
 }
 
 /* ---- phone sidebar backdrop ---- */
 .sidebar-scrim { display: none; }
 @media (max-width: 760px) {
   .sidebar { transition: transform .32s var(--ease-out, cubic-bezier(.2, .8, .2, 1)); }
+  /* No backdrop blur and fully removed while closed: an idle full-screen blur layer made iOS drop the
+     Capri shards behind the glass. */
   .sidebar-scrim {
-    display: block; position: fixed; inset: 0; z-index: 44;
-    background: rgba(0, 0, 0, .38); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
-    opacity: 0; pointer-events: none; transition: opacity .28s ease;
+    display: block; position: fixed; inset: 0; z-index: 44; background: rgba(0, 0, 0, .45);
+    opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .28s ease, visibility 0s linear .28s;
   }
-  .sidebar.open ~ .sidebar-scrim { opacity: 1; pointer-events: auto; }
+  .sidebar.open ~ .sidebar-scrim { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity .28s ease; }
 }
 
 /* ---- reschedule overdue ---- */
