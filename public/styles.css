@@ -407,7 +407,20 @@ select.btn { appearance: none; padding-right: 14px; cursor: pointer; }
 @keyframes rise { from { transform: translateY(10px) scale(.98); opacity: 0; } }
 .quick-card { padding: 16px 18px; display: grid; gap: 8px; }
 .quick-card input, .quick-card textarea { border: 0; background: none; outline: none; resize: none; }
-.quick-card > input { font-size: 17px; font-weight: 600; }
+.qi-wrap { position: relative; }
+.qi-wrap input, .qi-mirror { font-size: 17px; font-weight: 600; padding: 3px 0; margin: 0; width: 100%; letter-spacing: normal; line-height: 1.5; }
+.qi-wrap input { position: relative; z-index: 1; background: transparent; }
+.qi-mirror { position: absolute; inset: 0; white-space: pre; overflow: hidden; color: transparent; pointer-events: none; }
+.qi-mirror mark { color: transparent; border-radius: 6px; box-shadow: 0 0 0 2px var(--mk); background: var(--mk); }
+.hl-date { --mk: color-mix(in srgb, var(--green) 24%, transparent); }
+.hl-proj { --mk: color-mix(in srgb, var(--p3) 22%, transparent); }
+.hl-label { --mk: color-mix(in srgb, var(--accent) 20%, transparent); }
+.hl-prio { --mk: color-mix(in srgb, var(--p2) 24%, transparent); }
+.hl-dl { --mk: color-mix(in srgb, var(--deadline) 24%, transparent); }
+.quick-preview .chip.datec { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+.chip-x { border: 0; background: none; color: inherit; padding: 0; margin-left: 2px; display: grid; place-items: center; opacity: .7; }
+.chip-x:hover { opacity: 1; }
+.chip-x .ic { width: 12px; height: 12px; }
 .quick-card textarea { color: var(--muted); }
 .quick-dates { display: flex; gap: 8px; flex-wrap: wrap; }
 .date-pill {
@@ -528,3 +541,5 @@ select.btn { appearance: none; padding-right: 14px; cursor: pointer; }
 .meta .mi .ic { width: 13px; height: 13px; opacity: .85; }
 .ic.cal text { stroke: none; }
 .dl.urgent .ic.cal path, .dl.overdue .ic.cal path { fill: #fff; }
+
+.date-pill.overridden { opacity: .4; }

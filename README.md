@@ -20,7 +20,7 @@ The token never reaches the browser — the Express server proxies every call to
 
 - **Views:** Dashboard, Inbox, Today (with overdue + one-click "reschedule to today"), Upcoming (14 days), Focus (all P1/P2), Completed (last 7 days, with reopen), projects, labels, search
 - **Projects:** list or board layout per project, sections, drag cards between board columns, nested sub-projects and sub-tasks
-- **Quick add** with Todoist's natural language (`tomorrow 4pm #Work @focus p1`) and a live preview
+- **Quick add** with natural language and live inline highlighting. Dates are detected as you type, shorthand included: `tod`, `tmr`/`tmrw`, `fri`, `wed 3pm`, `next mon`, `nov 12`, `11/2`, `in 2 weeks`, `tonight`, `at noon`. The date is pulled out of the title and set as the do date; hit × on the date chip if a word wasn't meant as a date. `every …` repeats are passed to Todoist untouched
 - **Task drawer:** edit name, description, due (natural language), project/section, priority, labels, sub-tasks, comments, delete
 - **Command palette** (⌘K) for tasks, projects, labels and commands
 - **Dashboard:** overdue/today/week counts, completed-per-day chart, open tasks by project

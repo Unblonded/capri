@@ -148,6 +148,8 @@ function withDeadline(desc, date) {
   return date ? `${base ? base + '\n\n' : ''}Deadline: ${date}` : base;
 }
 
+// Shorthands people actually type: "tod", "tmr", "tmrw"…
+const DAY_ALIASES = { today: 0, tod: 0, tdy: 0, tonight: 0, tomorrow: 1, tmrw: 1, tmr: 1, tmw: 1, tomo: 1, tom: 1 };
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 // Small natural-language date parser for {deadline} text in quick add.
@@ -155,13 +157,12 @@ function parseDate(text) {
   const s = text.trim().toLowerCase();
   if (!s) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  if (s === 'today' || s === 'tod') return today();
-  if (s === 'tomorrow' || s === 'tom') return inDays(1);
+  if (s in DAY_ALIASES) return inDays(DAY_ALIASES[s]);
   if (s === 'next week') return nextWeekday(1);
   if (s === 'next month') { const d = new Date(); d.setMonth(d.getMonth() + 1, 1); return ymd(d); }
   if (s === 'end of week' || s === 'eow') return nextWeekday(5);
   if (s === 'end of month' || s === 'eom') { const d = new Date(); return ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0)); }
-  let m = s.match(/^in (\d+) ?(d|days?|w|weeks?|m|months?)$/);
+  let m = s.match(/^in (\d+) ?(d|days?|w|wks?|weeks?|m|mos?|months?)$/);
   if (m) {
     const n = Number(m[1]);
     if (m[2][0] === 'd') return inDays(n);
@@ -190,6 +191,56 @@ function parseDate(text) {
   if (m) return fromParts(Number(m[1]) - 1, Number(m[2]), m[3]);
   return null;
 }
+// ---- date detection inside task titles ("call mom tmr 3pm", "essay fri") ----
+
+const WD_RE = '(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:s|nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)';
+const MO_RE = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+const TIME_RE = '(?:\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)|\\d{1,2}:\\d{2}|noon|midnight)';
+const DAY_RE = `(?:${Object.keys(DAY_ALIASES).join('|')}|next\\s+week|next\\s+month|this\\s+weekend|weekend|(?:next\\s+|this\\s+)?${WD_RE}`
+  + `|in\\s+\\d+\\s*(?:days?|d|weeks?|wks?|w|months?|mos?)|${MO_RE}\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?|\\d{1,2}(?:st|nd|rd|th)?\\s+${MO_RE}|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?)`;
+const DATE_IN_TEXT = new RegExp(
+  `(?<![\\w#@/])(?:(${DAY_RE})(?:\\s+(?:at\\s+)?(${TIME_RE}))?|(?:at\\s+)?(${TIME_RE})(?:\\s+(${DAY_RE}))?)(?![\\w/])`, 'i');
+
+function parseTime(s) {
+  if (s === 'noon') return '12:00';
+  if (s === 'midnight') return '00:00';
+  const m = s.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2] || 0);
+  if (m[3] === 'pm' && h < 12) h += 12;
+  if (m[3] === 'am' && h === 12) h = 0;
+  return h > 23 || min > 59 ? null : `${pad(h)}:${pad(min)}`;
+}
+
+function resolveDay(s) {
+  if (s === 'weekend' || s === 'this weekend') return new Date().getDay() === 6 ? today() : nextWeekday(6);
+  const bare = s.replace(/^this /, '');
+  // "fri" typed on a Friday means today, like Todoist does.
+  const wd = WEEKDAYS.indexOf(bare.slice(0, 3));
+  if (!s.startsWith('next') && wd >= 0 && /^[a-z]+$/.test(bare) && wd === new Date().getDay()) return today();
+  return parseDate(bare);
+}
+
+// Finds the first date/time phrase in a title. Recurring phrases ("every mon") are left to Todoist.
+function detectDate(text) {
+  if (/\bevery\b/i.test(text)) return null;
+  const masked = text.replace(/\{[^}]*\}/g, (m) => ' '.repeat(m.length));
+  const m = DATE_IN_TEXT.exec(masked);
+  if (!m) return null;
+  const dayText = (m[1] || m[4] || '').toLowerCase().replace(/\s+/g, ' ');
+  const timeText = (m[2] || m[3] || '').toLowerCase().replace(/\s+/g, '');
+  let date = dayText ? resolveDay(dayText) : today();
+  const time = timeText ? parseTime(timeText) : dayText === 'tonight' ? '20:00' : null;
+  if (!date || (timeText && !time)) return null;
+  // A bare time that already passed today means tomorrow.
+  if (!dayText && new Date(`${date}T${time}:00`) < new Date()) date = inDays(1);
+  return { text: m[0], index: m.index, date, time };
+}
+
+const fmtTime = (hhmm) => new Date(`2000-01-01T${hhmm}:00`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const detectedLabel = (d) => `${dayLabel(d.date)}${d.time ? ' ' + fmtTime(d.time) : ''}`;
+
 function dueTime(t) {
   const dt = t.due?.datetime || (t.due?.date?.length > 10 ? t.due.date : null);
   if (!dt) return null;
@@ -941,37 +992,72 @@ function openQuick(ctx = null) {
   $('#quick-desc').value = '';
   $('#quick-due').value = ctx?.due || '';
   $('#quick-deadline').value = ctx?.deadline || '';
+  state.quickIgnore = null;
   const p = ctx?.project_id && projectById(ctx.project_id);
   input.placeholder = ctx?.parent_id ? 'Sub-task name…'
     : p ? `Add to ${projectName(p)}…  (dates, @labels, p1, {deadline} work too)`
-    : 'e.g. Review deck tomorrow 4pm #Work @focus p1 {friday}';
+    : 'e.g. Review deck tmr 4pm #Work @focus p1 {fri}';
   updateQuickPreview();
   setTimeout(() => input.focus(), 0);
 }
 
 function closeQuick() { $('#quick').classList.add('hidden'); }
 
+// The date found in the quick-add title, unless the user dismissed it.
+function quickDate(text) {
+  const d = detectDate(text);
+  return d && d.text !== state.quickIgnore ? d : null;
+}
+
+// Paints highlights behind the transparent input, Todoist-style.
+function renderQuickMirror(text, date) {
+  const ranges = [];
+  if (date) ranges.push([date.index, date.index + date.text.length, 'hl-date']);
+  for (const m of text.matchAll(/(^|\s)([#@]\S+)/g)) ranges.push([m.index + m[1].length, m.index + m[0].length, m[2][0] === '#' ? 'hl-proj' : 'hl-label']);
+  for (const m of text.matchAll(/(^|\s)(p[1-4])(?=\s|$)/gi)) ranges.push([m.index + m[1].length, m.index + m[0].length, 'hl-prio']);
+  for (const m of text.matchAll(/\{[^}]*\}/g)) ranges.push([m.index, m.index + m[0].length, 'hl-dl']);
+  ranges.sort((a, b) => a[0] - b[0]);
+  let html = '';
+  let at = 0;
+  for (const [start, end, cls] of ranges) {
+    if (start < at) continue;
+    html += esc(text.slice(at, start)) + `<mark class="${cls}">${esc(text.slice(start, end))}</mark>`;
+    at = end;
+  }
+  const mirror = $('#quick-mirror');
+  mirror.innerHTML = html + esc(text.slice(at)) + ' ';
+  mirror.scrollLeft = $('#quick-input').scrollLeft;
+}
+
 function updateQuickPreview() {
   const text = $('#quick-input').value;
+  const date = quickDate(text);
+  renderQuickMirror(text, date);
+  // A date typed in the title wins over the picker, so fade the picker to show that.
+  $('#quick-due').closest('.date-pill').classList.toggle('overridden', Boolean(date || /\bevery\b/i.test(text)));
   const chips = [];
   for (const m of text.matchAll(/(^|\s)#(\S+)/g)) chips.push([m[2], '', 'folder']);
   for (const m of text.matchAll(/(^|\s)@(\S+)/g)) chips.push([m[2], '', 'tag']);
   const pm = text.match(/(^|\s)p([1-4])(\s|$)/i);
   if (pm) chips.push(['Priority ' + pm[2], '', 'flag']);
-  const withoutDl = text.replace(/\{[^}]*\}/g, '');
-  const dm = withoutDl.match(/\b(today|tomorrow|tonight|next week|next month|every [a-z ]+|(mon|tue|wed|thu|fri|sat|sun)[a-z]*|in \d+ (days?|weeks?)|\d{1,2}(:\d\d)?\s?(am|pm))\b/i);
-  if (dm) chips.push([dm[0], '', 'calendar']);
+  const every = text.match(/\bevery\b[^#@{]*/i);
+  if (every) chips.push([every[0].trim(), '', 'repeat']);
+  else if (date) chips.push([detectedLabel(date), 'datec', 'calendar', true]);
   else if ($('#quick-due').value) chips.push([dayLabel($('#quick-due').value), '', 'calendar']);
   const dlText = text.match(/\{([^}]+)\}/);
   const dl = dlText ? parseDate(dlText[1]) : $('#quick-deadline').value;
   if (dlText && !dl) chips.push([`Can't read deadline “${dlText[1]}”`, 'warnc', 'warn']);
   else if (dl) chips.push([`Deadline ${dayLabel(dl)} · ${countdown(dl)}`, 'dlc', 'flag']);
-  $('#quick-preview').innerHTML = chips.map(([c, cls = '', icon]) =>
-    `<span class="chip ${cls}">${icon ? ic(icon) : ''}${esc(c)}</span>`).join('');
+  $('#quick-preview').innerHTML = chips.map(([c, cls = '', icon, dismiss]) =>
+    `<span class="chip ${cls}">${icon ? ic(icon) : ''}${esc(c)}${dismiss
+      ? `<button class="chip-x" data-quick-ignore title="Not a date — keep it in the title">${ic('close')}</button>` : ''}</span>`).join('');
 }
 
 async function saveQuick() {
-  const raw = $('#quick-input').value.trim();
+  let raw = $('#quick-input').value.trim();
+  // Pull the detected date out of the title ourselves so shorthands like "tmr" work.
+  const date = quickDate(raw);
+  if (date) raw = (raw.slice(0, date.index) + ' ' + raw.slice(date.index + date.text.length)).replace(/\s+/g, ' ').trim();
   const dlText = raw.match(/\{([^}]+)\}/);
   const dlDate = dlText ? parseDate(dlText[1]) : $('#quick-deadline').value;
   if (dlText && !dlDate) return toast(`Couldn't understand the deadline “${dlText[1]}” — try {fri}, {nov 2} or {in 2 weeks}`);
@@ -986,7 +1072,9 @@ async function saveQuick() {
     let task = await api('POST', '/api/tasks/quick', { text });
     const fix = {};
     if (description) fix.description = description;
-    if (dueDate && !task.due) fix.due_date = dueDate;
+    if (date?.time) fix.due_datetime = new Date(`${date.date}T${date.time}:00`).toISOString();
+    else if (date) fix.due_date = date.date;
+    else if (dueDate && !task.due) fix.due_date = dueDate;
     if (Object.keys(fix).length) task = { ...task, ...(await api('POST', `/api/tasks/${task.id}`, fix)) };
     // Inline adds inherit their project/section/parent unless the text names a #project.
     if (!/(^|\s)#\S/.test(text)) {
@@ -1004,8 +1092,9 @@ async function saveQuick() {
     render();
     $('#quick-input').value = '';
     $('#quick-desc').value = '';
+    state.quickIgnore = null;
     updateQuickPreview();
-    toast('Task added');
+    toast(date ? `Task added for ${detectedLabel(date)}` : 'Task added');
     if (ctx.parent_id) closeQuick();
   } catch (err) {
     toast(err.message);
@@ -1619,6 +1708,13 @@ document.addEventListener('drop', (e) => {
 });
 
 $('#quick-input').addEventListener('input', updateQuickPreview);
+$('#quick-input').addEventListener('scroll', () => { $('#quick-mirror').scrollLeft = $('#quick-input').scrollLeft; });
+$('#quick-preview').addEventListener('click', (e) => {
+  if (!e.target.closest('[data-quick-ignore]')) return;
+  state.quickIgnore = detectDate($('#quick-input').value)?.text || null;
+  updateQuickPreview();
+  $('#quick-input').focus();
+});
 $('#quick-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveQuick(); } });
 $('#quick-save').addEventListener('click', saveQuick);
 $('#quick-cancel').addEventListener('click', closeQuick);

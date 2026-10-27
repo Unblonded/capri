@@ -102,7 +102,10 @@
   <!-- Quick add modal -->
   <div id="quick" class="modal hidden">
     <div class="modal-card glass quick-card">
-      <input id="quick-input" placeholder="e.g. Review deck tomorrow 4pm #Work @focus p1 {friday}" autocomplete="off" />
+      <div class="qi-wrap">
+        <div id="quick-mirror" class="qi-mirror" aria-hidden="true"></div>
+        <input id="quick-input" placeholder="e.g. Review deck tmr 4pm #Work @focus p1 {fri}" autocomplete="off" spellcheck="false" />
+      </div>
       <textarea id="quick-desc" placeholder="Description" rows="2"></textarea>
       <div class="quick-dates">
         <label class="date-pill" title="When you plan to do it"><span><i data-ic="calendar"></i> Do date</span><input type="date" id="quick-due" /></label>
@@ -110,7 +113,7 @@
       </div>
       <div id="quick-preview" class="quick-preview"></div>
       <div class="quick-foot">
-        <span class="muted small">Type dates, <b>#project</b>, <b>@label</b>, <b>p1–p4</b>, <b>{deadline}</b></span>
+        <span class="muted small">Type dates like <b>tod</b>, <b>tmr</b>, <b>fri 3pm</b>, <b>#project</b>, <b>@label</b>, <b>p1–p4</b>, <b>{deadline}</b></span>
         <div>
           <button class="btn ghost" id="quick-cancel">Cancel</button>
           <button class="btn primary" id="quick-save">Add task</button>
