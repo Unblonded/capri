@@ -882,6 +882,13 @@ function renderAnimated() {
 function animateSync(before, { full = false, edits = false } = {}) {
   if (reducedMotion()) return;
   if (full) return animateViewIn();
+  // Removed rows leave first; everything below waits for them to clear before closing the gap,
+  // so nothing slides up through a row that's still fading out.
+  const current = new Set($$('.task[data-task]', $('#view')).map((el) => el.dataset.task));
+  const leaving = [...before].filter(([id, { el, rect }]) => !current.has(id) && rect.height && rect.bottom > 0 && rect.top < innerHeight
+    && !el.matches('.done-anim, .swipe-gone, .resched-out'));
+  const wait = leaving.length ? 200 : 0;
+  const glide = (el, dx, dy) => el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 480, delay: wait, easing: SYNC_EASE, fill: 'backwards' });
   let arriving = 0;
   for (const el of $$('.task[data-task]', $('#view'))) {
     const old = before.get(el.dataset.task);
@@ -900,7 +907,7 @@ function animateSync(before, { full = false, edits = false } = {}) {
     const dy = old.rect.top - rect.top;
     // Moved (another task came or went above it): glide from the old spot instead of jumping.
     if (old.rect.height && rect.height && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
-      el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 480, easing: SYNC_EASE });
+      glide(el, dx, dy);
     }
     // Edited elsewhere: the new text fades in.
     if (edits && old.html !== el.innerHTML) {
@@ -914,14 +921,11 @@ function animateSync(before, { full = false, edits = false } = {}) {
     const dx = old.rect.left - cur.rect.left;
     const dy = old.rect.top - cur.rect.top;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
-      cur.el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 480, easing: SYNC_EASE });
+      glide(cur.el, dx, dy);
     }
   }
-  // Gone from Todoist: a copy of the old row slides away where it used to be.
-  const current = new Set($$('.task[data-task]', $('#view')).map((el) => el.dataset.task));
-  for (const [id, { el, rect }] of before) {
-    if (current.has(id) || !rect.height || rect.bottom < 0 || rect.top > innerHeight) continue;
-    if (el.matches('.done-anim, .swipe-gone, .resched-out')) continue;
+  // Gone: a copy of the old row slides away where it used to be.
+  for (const [, { el, rect }] of leaving) {
     Object.assign(el.style, {
       position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`,
       margin: '0', pointerEvents: 'none', zIndex: '5', boxSizing: 'border-box',
@@ -930,7 +934,7 @@ function animateSync(before, { full = false, edits = false } = {}) {
     document.body.append(el);
     el.animate(
       [{ opacity: 1, transform: 'none', filter: 'none' }, { opacity: 0, transform: 'translateX(28px) scale(.97)', filter: 'blur(3px)' }],
-      { duration: 380, easing: 'cubic-bezier(.5, 0, .75, 0)', fill: 'forwards' },
+      { duration: 240, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' },
     ).finished.then(() => el.remove(), () => el.remove());
   }
 }
