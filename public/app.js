@@ -2221,6 +2221,7 @@ function applyTheme(theme) {
   if (!THEMES[theme]) theme = 'dark';
   document.documentElement.dataset.theme = theme;
   store.set('theme', theme);
+  $('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
   const btn = $('#theme-btn');
   if (btn) btn.title = `Theme: ${THEMES[theme]} (click to switch)`;
 }
