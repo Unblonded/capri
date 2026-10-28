@@ -12,6 +12,10 @@ const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
 const ICON = path.join(__dirname, 'icons', 'icon.png');
 const TRAY_ICON = path.join(__dirname, 'icons', process.platform === 'win32' ? 'tray.png' : 'trayTemplate.png');
 
+// Chromium stops painting a window it thinks other windows cover. Pinned to the desktop, Capri sits
+// under everything, so after a minimise it came back blank white. Always paint it.
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+
 let win = null;
 let tray = null;
 let quitting = false;
@@ -85,7 +89,7 @@ function createWindow() {
     ...(IS_MAC
       ? { trafficLightPosition: { x: 14, y: 11 } }
       : { titleBarOverlay: { color: '#00000000', symbolColor: '#8a8fa8', height: 34 } }),
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });
   win.setMenuBarVisibility(false);
 
@@ -129,6 +133,7 @@ function createWindow() {
   win.on('focus', () => { if (config.pinned && !raised) desktopPin.sendToBack(win); });
   win.on('blur', () => { if (raised) { raised = false; if (config.pinned) desktopPin.sendToBack(win); } });
   win.on('minimize', () => { if (config.pinned) win.restore(); });
+  win.on('restore', repaint);
 
   // Closing hides to the tray so Capri stays running.
   win.on('close', (e) => {
@@ -146,6 +151,18 @@ function createWindow() {
   win.on('move', rememberBounds);
 
   openServer();
+}
+
+// Coming back from minimised, make sure the page is drawn again rather than left white: ask for a
+// fresh frame, and nudge the size a pixel and back, which makes Windows hand over a new surface.
+function repaint() {
+  setTimeout(() => {
+    if (!win || win.isDestroyed() || win.isMinimized() || win.isMaximized()) return win?.webContents.invalidate();
+    const [w, h] = win.getSize();
+    win.setSize(w, h + 1);
+    win.setSize(w, h);
+    win.webContents.invalidate();
+  }, 50);
 }
 
 // Launched at login: stay in the tray (Windows passes --hidden; macOS tells us it opened it).
@@ -175,6 +192,7 @@ function setPinned(on) {
   }
   if (!on) desktopPin.unpin(win);
   win.setSkipTaskbar(on);
+  win.setMinimizable(!on); // a desktop widget has nothing to minimise to
   if (on) win.setAlwaysOnTop(false);
   else win.setAlwaysOnTop(Boolean(config.alwaysOnTop));
   saveConfig({ pinned: on });
