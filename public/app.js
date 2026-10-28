@@ -928,8 +928,11 @@ document.documentElement.addEventListener('mouseleave', () => { lightTarget?.cla
 
 function setView(view) {
   const hash = '#/' + [view.type, view.id].filter(Boolean).map(encodeURIComponent).join('/');
-  if (location.hash !== hash) location.hash = hash;
-  else applyHash();
+  if (location.hash === hash) return applyHash();
+  // Phones swap the view in place rather than adding a history step: iOS turns a swipe from the left
+  // edge (the one that pulls out the sidebar) into Back, sliding the whole app away to the last view.
+  if (isTouch()) location.replace(hash);
+  else location.hash = hash;
 }
 
 function applyHash() {
@@ -2816,7 +2819,7 @@ async function boot() {
   $('#connect').classList.add('hidden');
   $('#app').classList.remove('hidden');
   $('#view').innerHTML = '<div class="muted" style="padding:20px 0">Loading your tasks…</div>';
-  if (!location.hash) location.hash = '#/today';
+  if (!location.hash) location.replace('#/today');
   applyHash();
   await sync({ quiet: true });
 }
