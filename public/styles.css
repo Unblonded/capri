@@ -257,9 +257,39 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 #view-sub { font-size: 13px; margin-top: 2px; }
 .head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .menu-btn { display: none; }
-.ring { width: 46px; height: 46px; flex-shrink: 0; position: relative; }
-.ring svg { transform: rotate(-90deg); }
-.ring .pct { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+/* Today's progress: one segment per task due today, filled as they're done. */
+.day-progress { display: flex; align-items: center; gap: 10px; margin-top: 8px; max-width: 420px; }
+.dp-track { flex: 1; display: flex; gap: 3px; height: 6px; min-width: 60px; }
+.dp-seg { flex: 1; border-radius: 99px; background: var(--line); transition: background .4s ease; }
+.dp-seg.on { background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.dp-track.solid { background: var(--line); border-radius: 99px; overflow: hidden; }
+.dp-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .5s ease; }
+.dp-text { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dp-text b { color: var(--text); font-weight: 650; }
+.day-progress.all .dp-text b { color: var(--green); }
+
+/* ---- Focus view ---- */
+.focus-card { padding: 22px 24px; border-radius: 24px; margin: 6px auto 22px; display: grid; gap: 14px; }
+.fc-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.fc-mode { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.focus-card.running .fc-mode { color: var(--accent); }
+.focus-card.break .fc-mode { color: var(--green); }
+.fc-sessions { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+.fc-sessions i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.fc-task { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; }
+.fc-task.empty-pick { color: var(--muted); font-weight: 500; font-size: 16px; }
+.fc-task-meta { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.fc-clock { display: flex; align-items: center; gap: 16px; }
+.fc-time { font-size: 46px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1; }
+.fc-bar { flex: 1; height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.fc-bar > span { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 1s linear; }
+.focus-card.break .fc-bar > span { background: var(--green); }
+.fc-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.fc-btns .btn .ic { width: 15px; height: 15px; }
+.task .focus-pick { flex-shrink: 0; align-self: center; }
+.task.focus-row .task-actions { display: none; } /* the Focus button takes their place */
+.task .focus-pick .ic { width: 13px; height: 13px; }
+@media (max-width: 760px) { .fc-time { font-size: 38px; } .focus-card { padding: 18px; } }
 .view { flex: 1; overflow-y: auto; padding: 4px 32px 100px; }
 .view > * { max-width: 860px; margin-left: auto; margin-right: auto; }
 .view.wide > * { max-width: none; }
@@ -912,7 +942,8 @@ select[data-dd] { display: none !important; } /* .btn styles would otherwise ove
 :root[data-theme="capri"] .meta .due.today { box-shadow: 0 0 10px rgba(57, 255, 136, .18); }
 :root[data-theme="capri"] .meta .due.overdue { box-shadow: 0 0 10px rgba(255, 71, 102, .2); }
 :root[data-theme="capri"] .bar { background: linear-gradient(180deg, #ff6a95, #ff2e5c); box-shadow: 3px 0 0 rgba(154, 77, 255, .6), 0 0 12px rgba(255, 46, 92, .4); }
-:root[data-theme="capri"] .ring circle[stroke^="url"] { filter: drop-shadow(0 0 5px rgba(255, 46, 92, .7)); }
+:root[data-theme="capri"] .dp-seg.on, :root[data-theme="capri"] .dp-fill, :root[data-theme="capri"] .fc-bar > span { box-shadow: 0 0 8px rgba(255, 46, 92, .6); }
+:root[data-theme="capri"] .fc-time { text-shadow: 2px 0 rgba(154, 77, 255, .7); }
 :root[data-theme="capri"] .toast { border-color: rgba(255, 46, 92, .35); box-shadow: inset 3px 0 0 var(--accent), var(--shadow); }
 :root[data-theme="capri"] ::selection { background: rgba(57, 255, 136, .32); }
 :root[data-theme="capri"] ::-webkit-scrollbar-thumb { background-color: rgba(255, 46, 92, .3); }

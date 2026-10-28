@@ -1117,7 +1117,7 @@ function renderSidebar() {
   const dlOverdue = dlSoon.some((x) => deadlineDay(x) < t);
   const ib = inbox();
   const countIn = (pid) => open.filter((x) => x.project_id === pid).length;
-  const focus = open.filter((x) => x.priority >= 3).length;
+  const focus = upNext().length;
 
   $('#nav-main').innerHTML = [
     navItem({ type: 'dashboard', ico: 'grid', name: 'Dashboard' }),
@@ -1125,7 +1125,7 @@ function renderSidebar() {
     navItem({ type: 'today', ico: 'sun', name: 'Today', count: todayCount, alert: overdue > 0 }),
     navItem({ type: 'upcoming', ico: 'calendar', name: 'Upcoming', count: upcoming }),
     navItem({ type: 'deadlines', ico: 'flag', name: 'Deadlines', count: dlSoon.length, alert: dlOverdue }),
-    navItem({ type: 'focus', ico: 'star', name: 'Focus (P1 & P2)', count: focus }),
+    navItem({ type: 'focus', ico: 'timer', name: 'Focus', count: focus }),
     navItem({ type: 'board', ico: 'board', name: 'Board' }),
     navItem({ type: 'sketches', ico: 'pencil', name: 'Notes', count: state.drawings.length }),
     navItem({ type: 'completed', ico: 'done', name: 'Completed' }),
@@ -1140,7 +1140,7 @@ function renderSidebar() {
   ).join('') || '<div class="muted small" style="padding:4px 10px">No labels</div>';
 }
 
-function taskRow(t, { showProject = true, depth = 0 } = {}) {
+function taskRow(t, { showProject = true, depth = 0, focusPick = false } = {}) {
   const day = dueDay(t);
   const time = dueTime(t);
   const dl = deadlineDay(t);
@@ -1159,7 +1159,7 @@ function taskRow(t, { showProject = true, depth = 0 } = {}) {
     ...(t.labels || []).map((l) => `<span class="label">@${esc(l)}</span>`),
     showProject && p && `<span class="proj">${esc(projectName(p))}${section ? ' / ' + esc(section.name) : ''}<span class="dot" style="background:${color(p.color)}"></span></span>`,
   ].filter(Boolean).join('');
-  const cls = [state.selectedId === t.id && 'selected', state.picked.has(t.id) && 'picked'].filter(Boolean).join(' ');
+  const cls = [state.selectedId === t.id && 'selected', state.picked.has(t.id) && 'picked', focusPick && 'focus-row'].filter(Boolean).join(' ');
   return `<div class="task ${cls}" data-task="${t.id}" draggable="true" ${depth ? `style="margin-left:${depth * 30}px"` : ''}>
     <button class="check ${prioClass(t.priority)} ${t.checked ? 'checked' : ''}" data-act="complete" title="Complete">${ic('check')}</button>
     <div class="task-body">
@@ -1167,6 +1167,7 @@ function taskRow(t, { showProject = true, depth = 0 } = {}) {
       ${stripDeadline(t.description) ? `<div class="task-desc">${esc(stripDeadline(t.description).split('\n')[0])}</div>` : ''}
       ${meta ? `<div class="meta">${meta}</div>` : ''}
     </div>
+ ${focusPick ? `<button class="btn sm focus-pick" data-act="h-timer" title="Focus on this">${ic('timer')} Focus</button>` : ''}
     <div class="task-actions">
       <button class="icon-btn" data-act="h-today" title="Do today (T)">${ic('sun')}</button>
       <button class="icon-btn" data-act="h-tomorrow" title="Do tomorrow (M)">${ic('arrow')}</button>
@@ -1394,22 +1395,66 @@ function dropOnColumn(id, column) {
   }
 }
 
+// Today's progress under the date: "3 of 7 done", with a bar of one segment per task (a plain bar past 16).
 function renderRing() {
   const ring = $('#ring');
   const left = openTasks().filter((x) => dueDay(x) && dueDay(x) <= today()).length;
   const done = state.doneToday;
   if (state.view.type !== 'today' || done == null || done + left === 0) { ring.classList.add('hidden'); return; }
-  const pct = done / (done + left);
-  const c = 2 * Math.PI * 19;
+  const total = done + left;
   ring.classList.remove('hidden');
-  ring.title = `${done} done, ${left} to go today`;
-  ring.innerHTML = `<svg width="46" height="46" viewBox="0 0 46 46">
-    <circle cx="23" cy="23" r="19" fill="none" stroke="var(--line)" stroke-width="5"/>
-    <circle cx="23" cy="23" r="19" fill="none" stroke="url(#rg)" stroke-width="5" stroke-linecap="round"
-      stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct)}" style="transition:stroke-dashoffset .5s"/>
-    <defs><linearGradient id="rg"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent-2)"/></linearGradient></defs>
-  </svg><span class="pct">${Math.round(pct * 100)}%</span>`;
+  ring.classList.toggle('all', !left);
+  const track = total <= 16
+    ? `<div class="dp-track">${Array.from({ length: total }, (_, i) => `<span class="dp-seg ${i < done ? 'on' : ''}"></span>`).join('')}</div>`
+    : `<div class="dp-track solid"><div class="dp-fill" style="width:${(done / total) * 100}%"></div></div>`;
+  const text = left ? `<b>${done} of ${total}</b> done · ${left} to go` : `<b>All ${total} done</b> · nice work`;
+  ring.innerHTML = `${track}<span class="dp-text">${text}</span>`;
 }
+
+// ---------- focus view ----------
+// What to work on next: overdue and today's tasks, deadlines closing in, and high priorities, best first.
+function focusScore(t) {
+  const now = today();
+  const day = dueDay(t);
+  const dl = deadlineDay(t);
+  let score = { 4: 30, 3: 20, 2: 6 }[t.priority] || 0;
+  if (day && day < now) score += 50;
+  else if (day === now) score += 40;
+  else if (day === inDays(1)) score += 10;
+  if (dl) score += dl <= now ? 45 : dl <= inDays(3) ? 30 : dl <= inDays(7) ? 15 : 0;
+  return score;
+}
+const upNext = () => openTasks().filter((t) => t.id !== timer.taskId && focusScore(t) >= 20)
+  .sort((a, b) => focusScore(b) - focusScore(a) || (dueDay(a) || '9').localeCompare(dueDay(b) || '9')).slice(0, 8);
+
+// Finished focus sessions today, kept on this device.
+const focusLog = () => { const l = store.get('focusLog', null); return l?.day === today() ? l : { day: today(), count: 0 }; };
+
+function focusCardHtml() {
+  const task = timer.taskId && taskById(timer.taskId);
+  const left = timerLeft();
+  const pct = (1 - left / TIMER_LEN[timer.mode]) * 100;
+  const sessions = focusLog().count;
+  const p = task && projectById(task.project_id);
+  return `<div class="focus-card glass ${timer.running ? 'running' : ''} ${timer.mode === 'break' ? 'break' : ''}" id="focus-card">
+    <div class="fc-top">
+      <span class="fc-mode">${timer.mode === 'break' ? 'Break' : timer.running ? 'Focusing on' : task ? 'Ready to focus on' : 'Focus'}</span>
+      <span class="fc-sessions">${sessions ? `${'<i></i>'.repeat(Math.min(sessions, 8))} ${sessions} session${sessions === 1 ? '' : 's'} today` : 'No sessions yet today'}</span>
+    </div>
+    <div>${task
+      ? `<div class="fc-task">${md(task.content)}</div><div class="fc-task-meta">${esc(p ? projectName(p) : '')}${dueDay(task) ? ' · ' + esc(dayLabel(dueDay(task))) : ''}</div>`
+      : `<div class="fc-task empty-pick">${timer.mode === 'break' ? 'Stretch, get some water.' : 'Pick something from Up next, or just start a session.'}</div>`}</div>
+    <div class="fc-clock"><span class="fc-time">${mmss(left)}</span><div class="fc-bar"><span style="width:${pct}%"></span></div></div>
+    <div class="fc-btns">
+      <button class="btn primary" data-act="fc-toggle">${ic(timer.running ? 'timer' : 'sparkle')} ${timer.running ? 'Pause' : 'Start'}</button>
+      ${task ? `<button class="btn" data-act="fc-done">${ic('check')} Done</button>` : ''}
+      <button class="btn ghost" data-act="fc-switch">${ic('swap')} ${timer.mode === 'break' ? 'Back to focus' : 'Take a break'}</button>
+      <button class="btn ghost" data-act="fc-reset">Reset</button>
+      ${task ? `<button class="btn ghost" data-act="fc-clear">${ic('close')} Unlink task</button>` : ''}
+    </div>
+  </div>`;
+}
+
 
 function renderView() {
   const v = state.view;
@@ -1476,11 +1521,13 @@ function renderView() {
     if (!withDl.length) html = empty('flag', 'No deadlines yet. Open any task and set one, press D on a selected task, or type {friday} in quick add. Capri keeps them itself, so no Todoist Pro needed.');
   } else if (v.type === 'focus') {
     title = 'Focus';
-    sub = 'Your P1 and P2 tasks across every project';
-    const p1 = open.filter((x) => x.priority === 4);
-    const p2 = open.filter((x) => x.priority === 3);
-    html += group('Priority 1', taskTree(p1) || none, { sub: String(p1.length), key: 'p1' });
-    html += group('Priority 2', taskTree(p2) || none, { sub: String(p2.length), key: 'p2' });
+    sub = 'One thing at a time: pick a task, start the timer, finish it';
+    actions = '';
+    const next = upNext();
+    html += focusCardHtml();
+    html += group('Up next', next.map((x) => taskRow(x, { focusPick: true })).join('')
+      || '<div class="muted small" style="padding:10px">Nothing urgent: no overdue, due-today, deadline or high-priority tasks.</div>',
+    { sub: String(next.length), key: 'upnext' });
   } else if (v.type === 'project') {
     const p = projectById(v.id);
     if (!p) { title = 'Project not found'; html = empty('warn', 'This project no longer exists.'); }
@@ -2220,6 +2267,11 @@ function renderTimer() {
   $('#timer-time').textContent = mmss(left);
   $('#timer-task').textContent = task ? '↳ ' + plain(task.content) : 'No task linked';
   $('#timer-toggle').textContent = timer.running ? 'Pause' : 'Start';
+  const card = $('#focus-card');
+  if (card) { // the Focus view's card ticks along with the sidebar timer
+    $('.fc-time', card).textContent = mmss(left);
+    $('.fc-bar > span', card).style.width = `${(1 - left / TIMER_LEN[timer.mode]) * 100}%`;
+  }
   document.title = timer.running ? `${mmss(left)} · ${state.baseTitle}` : state.baseTitle;
 }
 
@@ -2232,12 +2284,15 @@ function startTimer(taskId) {
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   saveTimer();
   renderTimer();
+  timerChanged();
   const task = timer.taskId && taskById(timer.taskId);
   toast(task ? `Focusing on “${plain(task.content)}”` : 'Focus timer started');
 }
 
-function pauseTimer() { timer.remaining = timerLeft(); timer.running = false; saveTimer(); renderTimer(); }
-function resetTimer() { timer.running = false; timer.remaining = TIMER_LEN[timer.mode]; saveTimer(); renderTimer(); }
+// The Focus view shows the timer's task and state, so redraw it when they change.
+const timerChanged = () => { if (state.view.type === 'focus') render(); };
+function pauseTimer() { timer.remaining = timerLeft(); timer.running = false; saveTimer(); renderTimer(); timerChanged(); }
+function resetTimer() { timer.running = false; timer.remaining = TIMER_LEN[timer.mode]; saveTimer(); renderTimer(); timerChanged(); }
 function switchTimer() { timer.mode = timer.mode === 'focus' ? 'break' : 'focus'; resetTimer(); }
 
 function chime() {
@@ -2260,6 +2315,7 @@ function chime() {
 setInterval(() => {
   if (timer.running && timerLeft() <= 0) {
     const msg = timer.mode === 'focus' ? 'Focus session done — take a 5 minute break.' : 'Break over — back to it.';
+    if (timer.mode === 'focus') { const log = focusLog(); log.count++; store.set('focusLog', log); }
     timer.mode = timer.mode === 'focus' ? 'break' : 'focus';
     timer.running = false;
     timer.remaining = TIMER_LEN[timer.mode];
@@ -2267,6 +2323,7 @@ setInterval(() => {
     chime();
     toast(msg);
     if ('Notification' in window && Notification.permission === 'granted') new Notification('Capri', { body: msg });
+    timerChanged();
   }
   renderTimer();
 }, 1000);
@@ -2992,6 +3049,17 @@ document.addEventListener('click', (e) => {
     if (a === 'h-deadline') return openDetail(target, '#d-deadline');
     if (a === 'h-sketch') return openDraw({ taskId: target });
     if (a === 'h-timer') return startTimer(target);
+    if (a === 'fc-toggle') return timer.running ? pauseTimer() : startTimer();
+    if (a === 'fc-switch') return switchTimer();
+    if (a === 'fc-reset') return resetTimer();
+    if (a === 'fc-clear') { timer.taskId = null; saveTimer(); renderTimer(); return timerChanged(); }
+    if (a === 'fc-done') {
+      const id = timer.taskId;
+      timer.taskId = null;
+      saveTimer();
+      renderTimer();
+      return completeTask(id);
+    }
     if (a === 'due-to-deadline') {
       const t = taskById(state.detailId);
       return setDueDate(t.id, ymd(addDays(parseDay(deadlineDay(t)), -1)));
