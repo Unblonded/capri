@@ -537,7 +537,7 @@ let swipe = null;
 let swipeEndedAt = 0;
 
 document.addEventListener('pointerdown', (e) => {
-  if (e.pointerType !== 'touch' || swipe) return;
+  if (e.pointerType !== 'touch' || swipe || e.clientX < NAV_EDGE) return; // the left edge pulls the sidebar out
   const row = e.target.closest('#view .task[data-task]');
   if (!row || e.target.closest('input, textarea, select, button.icon-btn')) return;
   swipe = { row, id: row.dataset.task, pid: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, active: false, onCheck: e.target.closest('.check') };
@@ -3306,6 +3306,64 @@ document.addEventListener('touchmove', (e) => {
 }, { passive: true });
 document.addEventListener('touchend', () => { if (headHold) { clearTimeout(headHold.timer); headHold = null; } });
 
+// Phone: swipe right to pull the sidebar out (from the left edge, or anywhere off a task), swipe left to put it away.
+// The sidebar follows the finger and settles open or shut depending on how far, and how fast, it went.
+const NAV_EDGE = 24;
+let navSwipe = null;
+document.addEventListener('touchstart', (e) => {
+  if (navSwipe || e.touches.length > 1 || !matchMedia('(max-width: 760px)').matches) return;
+  const t = e.touches[0];
+  const side = $('#sidebar');
+  const open = side.classList.contains('open');
+  if (open) {
+    if (!e.target.closest('#sidebar, #sidebar-scrim')) return;
+  } else {
+    if (!e.target.closest('.main') || $('.modal:not(.hidden), #detail:not(.hidden), .ctx-menu')) return;
+    const edge = t.clientX < NAV_EDGE;
+    if (!edge && e.target.closest('.task, input, textarea, select, canvas, [contenteditable]')) return;
+  }
+  navSwipe = { open, x: t.clientX, y: t.clientY, t: e.timeStamp, last: t.clientX, lastT: e.timeStamp, v: 0, active: false };
+}, { passive: true });
+document.addEventListener('touchmove', (e) => {
+  const s = navSwipe;
+  if (!s) return;
+  const t = e.touches[0];
+  const dx = t.clientX - s.x;
+  const dy = t.clientY - s.y;
+  if (!s.active) {
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { navSwipe = null; return; }
+    if (Math.abs(dx) < 10) return;
+    if (s.open ? dx > 0 : dx < 0) { navSwipe = null; return; }
+    if (hold?.ghost || colDrag?.on || swipe?.active) { navSwipe = null; return; }
+    s.active = true;
+    s.w = $('#sidebar').offsetLeft + $('#sidebar').offsetWidth + 8; // offsets ignore the transform
+    $('#sidebar').style.transition = 'none';
+    Object.assign($('#sidebar-scrim').style, { transition: 'none', visibility: 'visible' });
+    if (headHold) { clearTimeout(headHold.timer); headHold = null; }
+  }
+  e.preventDefault();
+  if (e.timeStamp > s.lastT) { s.v = (t.clientX - s.last) / (e.timeStamp - s.lastT); s.last = t.clientX; s.lastT = e.timeStamp; }
+  s.p = Math.min(1, Math.max(0, (s.open ? s.w + dx : dx) / s.w));
+  $('#sidebar').style.transform = `translateX(${(s.p - 1) * s.w}px)`;
+  $('#sidebar-scrim').style.opacity = s.p;
+}, { passive: false });
+const endNavSwipe = () => {
+  const s = navSwipe;
+  navSwipe = null;
+  if (!s?.active) return;
+  swipeEndedAt = Date.now(); // the lift-off isn't a tap
+  const open = Math.abs(s.v) > 0.4 ? s.v > 0 : s.p > 0.5;
+  const side = $('#sidebar');
+  const scrim = $('#sidebar-scrim');
+  side.style.transition = scrim.style.transition = '';
+  side.getBoundingClientRect(); // start the settle from where the finger left it
+  side.classList.toggle('open', open);
+  side.style.transform = '';
+  scrim.style.opacity = scrim.style.visibility = '';
+};
+document.addEventListener('touchend', endNavSwipe);
+document.addEventListener('touchcancel', endNavSwipe);
+
 $('#quick-input').addEventListener('input', updateQuickPreview);
 $('#quick-input').addEventListener('scroll', () => { $('#quick-mirror').scrollLeft = $('#quick-input').scrollLeft; });
 $('#quick-preview').addEventListener('click', (e) => {
@@ -3332,7 +3390,7 @@ $('#refresh-btn').addEventListener('click', () => sync());
 $('#add-project').addEventListener('click', createProject);
 $('#menu-btn').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
 // Phone: tapping anywhere outside the sidebar, or picking something in it, closes it.
-$('#sidebar-scrim').addEventListener('pointerdown', (e) => { e.preventDefault(); $('#sidebar').classList.remove('open'); });
+$('#sidebar-scrim').addEventListener('click', () => $('#sidebar').classList.remove('open'));
 $('#sidebar').addEventListener('click', (e) => {
   if (e.target.closest('.nav-item, #sidebar-add, #sidebar-search')) $('#sidebar').classList.remove('open');
 });
