@@ -356,6 +356,54 @@ app.post('/api/drawings', requireToken, express.json({ limit: '25mb' }), (req, r
   res.json(drawing);
 });
 
+// ---- preferences (stored per user), such as the order you've put board columns in ----
+
+const prefsFile = (req) => path.join(userDir(req), 'prefs.json');
+function readPrefs(req) {
+  try { return JSON.parse(fs.readFileSync(prefsFile(req), 'utf8')); } catch { return {}; }
+}
+
+app.get('/api/prefs', requireToken, (req, res) => res.json(readPrefs(req)));
+
+// Sets one key at a time; a null value removes it.
+app.post('/api/prefs', requireToken, (req, res) => {
+  const { key, value } = req.body || {};
+  if (typeof key !== 'string' || !/^[\w:.-]{1,120}$/.test(key)) return res.status(400).json({ error: 'Bad key' });
+  if (JSON.stringify(value ?? null).length > 20000) return res.status(400).json({ error: 'Value too large' });
+  const prefs = readPrefs(req);
+  if (value === null || value === undefined) delete prefs[key];
+  else prefs[key] = value;
+  fs.mkdirSync(userDir(req), { recursive: true });
+  fs.writeFileSync(prefsFile(req), JSON.stringify(prefs, null, 2));
+  res.json({ ok: true });
+});
+
+// ---- deadlines (stored per user): task id → YYYY-MM-DD ----
+// Todoist only has deadlines on Pro, so Capri keeps its own.
+
+const deadlinesFile = (req) => path.join(userDir(req), 'deadlines.json');
+function readDeadlines(req) {
+  try { return JSON.parse(fs.readFileSync(deadlinesFile(req), 'utf8')); } catch { return {}; }
+}
+
+app.get('/api/deadlines', requireToken, (req, res) => res.json(readDeadlines(req)));
+
+// { set: { taskId: 'YYYY-MM-DD' | null, … } }
+app.post('/api/deadlines', requireToken, (req, res) => {
+  const set = req.body?.set;
+  if (!set || typeof set !== 'object') return res.status(400).json({ error: 'Expected { set }' });
+  const all = readDeadlines(req);
+  for (const [id, date] of Object.entries(set)) {
+    if (!/^[\w-]{1,64}$/.test(id)) return res.status(400).json({ error: 'Bad task id' });
+    if (date === null) delete all[id];
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(date)) all[id] = date;
+    else return res.status(400).json({ error: 'Bad date' });
+  }
+  fs.mkdirSync(userDir(req), { recursive: true });
+  fs.writeFileSync(deadlinesFile(req), JSON.stringify(all, null, 2));
+  res.json({ ok: true });
+});
+
 app.delete('/api/drawings/:id', requireToken, (req, res) => {
   if (!validId(req.params.id)) return res.status(404).end();
   writeDrawings(req, readDrawings(req).filter((d) => d.id !== req.params.id));

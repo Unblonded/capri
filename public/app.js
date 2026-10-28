@@ -77,6 +77,7 @@ const prioClass = (p) => (p === 4 ? 'p1' : p === 3 ? 'p2' : p === 2 ? 'p3' : 'p4
 
 const state = {
   projects: [], sections: [], labels: [], tasks: [], drawings: [],
+  deadlines: {}, prefs: {}, // kept on Capri's server, per person
   view: { type: 'today' },
   selectedId: null,
   detailId: null,
@@ -126,22 +127,24 @@ let lastSyncFingerprint = '';
 async function sync({ quiet = false, auto = false } = {}) {
   const seq = writes.seq;
   try {
-    const [data, { drawings }] = await Promise.all([api('GET', '/api/bootstrap'), api('GET', '/api/drawings')]);
+    const [data, { drawings }, deadlines, prefs] = await Promise.all([
+      api('GET', '/api/bootstrap'), api('GET', '/api/drawings'), api('GET', '/api/deadlines'), api('GET', '/api/prefs')]);
     // You changed something while this was loading; the next sync will include it.
     if (auto && (writes.pending || writes.seq !== seq)) return;
     // Nothing changed since last time: don't redraw under the user.
-    const fingerprint = JSON.stringify([data, drawings]);
+    const fingerprint = JSON.stringify([data, drawings, deadlines, prefs]);
     if (auto && fingerprint === lastSyncFingerprint) { state.lastSync = Date.now(); return; }
     const firstLoad = !lastSyncFingerprint;
     lastSyncFingerprint = fingerprint;
     data.tasks = data.tasks.filter((x) => !pendingDeletes.has(x.id) && !pendingDeletes.has(x.parent_id));
-    Object.assign(state, data, { drawings, lastSync: Date.now() });
+    Object.assign(state, data, { drawings, deadlines, prefs, lastSync: Date.now() });
     loadDoneToday();
     const before = taskRowsOnScreen();
     render();
     // First load and a tap on Sync flow the whole list in; background syncs only move what changed.
     animateSync(before, { full: !quiet || firstLoad, edits: true });
     if (!quiet) toast('Synced with Todoist');
+    migrateDeadlines();
   } catch (err) {
     if (!quiet) toast(err.message);
   }
@@ -169,14 +172,29 @@ const daysUntil = (day) => Math.round((parseDay(day) - parseDay(today())) / 864e
 const nextWeekday = (wd) => { const d = new Date(); return inDays(((wd - d.getDay() + 7) % 7) || 7); };
 
 function dueDay(t) { return t.due?.date ? t.due.date.slice(0, 10) : null; }
-// Deadlines are a Todoist Pro feature, so they're stored as a "Deadline: YYYY-MM-DD" line
-// at the end of the task description instead. That also keeps them visible in Todoist itself.
+// Deadlines are a Todoist Pro feature, so Capri keeps them on its own server (per person).
+// Older versions wrote a "Deadline: YYYY-MM-DD" line into the description; migrateDeadlines moves those.
 const DEADLINE_RE = /\n*^[ \t]*Deadline:[ \t]*(\d{4}-\d{2}-\d{2})[^\n]*$/im;
-function deadlineDay(t) { return t.description?.match(DEADLINE_RE)?.[1] || null; }
+const legacyDeadline = (t) => t.description?.match(DEADLINE_RE)?.[1] || null;
+function deadlineDay(t) { return state.deadlines[t.id] || legacyDeadline(t); }
 const stripDeadline = (desc) => (desc || '').replace(DEADLINE_RE, '').trimEnd();
-function withDeadline(desc, date) {
-  const base = stripDeadline(desc);
-  return date ? `${base ? base + '\n\n' : ''}Deadline: ${date}` : base;
+const saveDeadlines = (set) => api('POST', '/api/deadlines', { set });
+
+let migrating = false;
+async function migrateDeadlines() {
+  const old = state.tasks.filter((t) => !t.checked && legacyDeadline(t));
+  if (migrating || !old.length) return;
+  migrating = true;
+  try {
+    const set = {};
+    for (const t of old) if (!state.deadlines[t.id]) set[t.id] = legacyDeadline(t);
+    if (Object.keys(set).length) { await saveDeadlines(set); Object.assign(state.deadlines, set); }
+    for (const t of old) {
+      const description = stripDeadline(t.description);
+      await api('POST', `/api/tasks/${t.id}`, { description });
+      patchLocal(t.id, { description });
+    }
+  } catch { /* tried again on the next sync */ } finally { migrating = false; }
 }
 
 // Shorthands people actually type: "tod", "tmr", "tmrw"…
@@ -831,11 +849,41 @@ function openSectionMenu(id, head, x, y) {
   head.classList.add('menu-on');
 }
 
+// Right-click on a board column's heading: move it, and rename or delete it if it's a section.
+function openColumnMenu(head, x, y) {
+  const keys = movableKeys(head.closest('.board'));
+  const i = keys.indexOf(head.dataset.move);
+  const sec = head.dataset.section;
+  closeDropdown();
+  closeTaskMenu();
+  const items = [
+    sec && ['pencil', 'Rename', () => renameSection(sec)],
+    i > 0 && ['back', 'Move left', () => moveColumn(head, -1)],
+    i < keys.length - 1 && ['arrow', 'Move right', () => moveColumn(head, 1)],
+    sec && '-',
+    sec && ['trash', 'Delete section', () => deleteSection(sec), 'danger'],
+  ].filter(Boolean);
+  if (!items.length) return;
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu ctx-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = items.map((it) => menuItem(items, it)).join('');
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const opt = e.target.closest('[data-i]');
+    if (!opt) return;
+    closeTaskMenu();
+    items[opt.dataset.i][2]();
+  });
+  showMenu(menu, x, y);
+  head.classList.add('menu-on');
+}
+
 document.addEventListener('contextmenu', (e) => {
-  const head = e.target.closest('.group-head[data-section]');
+  const head = e.target.closest('.group-head[data-move], .group-head[data-section]');
   if (head && !e.target.closest('.task')) {
     e.preventDefault();
-    return openSectionMenu(head.dataset.section, head, e.clientX, e.clientY);
+    return head.dataset.move ? openColumnMenu(head, e.clientX, e.clientY) : openSectionMenu(head.dataset.section, head, e.clientX, e.clientY);
   }
   const row = e.target.closest('.task[data-task]');
   if (!row || e.target.closest('input, textarea')) return;
@@ -1165,6 +1213,12 @@ function groupControl(choices, current) {
     `<option value="${k}" ${current === k ? 'selected' : ''}>Columns: ${BOARD_GROUPS[k]}</option>`).join('')}</select>`;
 }
 
+// Columns you can rearrange: sections (order saved in Todoist), projects and labels (order saved
+// on Capri's server under your account, one per board).
+const MOVABLE = ['section', 'project', 'label'];
+const colOrderKey = (by) => `cols:${boardKey()}:${by}`;
+let boardOrder = { by: '', keys: [] }; // every column of the board on screen, hidden ones too
+
 function boardColumns(tasks, by, project) {
   const base = project ? { project_id: project.id } : {};
   const t = today();
@@ -1201,6 +1255,14 @@ function boardColumns(tasks, by, project) {
     col('nolabel', 'No label', (x) => !first(x), { drop: { label: '' } });
     for (const n of names) col('l:' + n, '@' + n, (x) => first(x) === n, { drop: { label: n }, add: { ...base, label: n } });
   }
+  const order = by !== 'section' && state.prefs[colOrderKey(by)];
+  if (Array.isArray(order)) {
+    // Columns you've never placed (a new project, say) keep their spot after the ones you have.
+    const pos = new Map(order.map((k, i) => [k, i]));
+    const rank = (c) => (pos.has(c.key) ? pos.get(c.key) : order.length + cols.indexOf(c));
+    cols.sort((a, b) => rank(a) - rank(b));
+  }
+  boardOrder = { by, keys: cols.map((c) => c.key) };
   return cols.filter((c) => c.keep || c.items.length);
 }
 
@@ -1212,7 +1274,7 @@ function renderBoard(tasks, by, project) {
     const ids = new Set(c.items.map((x) => x.id));
     const cards = sortTasks(c.items.filter((x) => !ids.has(x.parent_id)));
     return `<div class="column glass ${c.drop ? '' : 'no-drop'}" data-col="${esc(c.key)}" ${c.drop ? `data-drop='${esc(JSON.stringify(c.drop))}'` : ''}>
-      <div class="group-head ${c.cls}" ${c.section ? `data-section="${esc(c.section)}"` : ''}>${esc(c.name)} <span class="muted">${c.sub ? esc(c.sub) + ' · ' : ''}${cards.length}</span></div>
+      <div class="group-head ${c.cls}" ${c.section ? `data-section="${esc(c.section)}"` : ''} ${MOVABLE.includes(by) && (by !== 'section' || c.section) ? `data-move="${esc(c.key)}"` : ''}>${esc(c.name)} <span class="muted">${c.sub ? esc(c.sub) + ' · ' : ''}${cards.length}</span></div>
       <div class="col-body">${cards.map((x) => taskRow(x, { showProject })).join('') || '<div class="col-empty">Drop tasks here</div>'}</div>
       ${c.drop ? inlineAdd(c.add) : ''}
     </div>`;
@@ -1325,7 +1387,7 @@ function renderView() {
     }).join('');
     const risky = withDl.filter(lateForDeadline);
     if (risky.length) html = `<div class="banner" style="--deadline:var(--p1)">${ic('warn')} ${risky.length} task${risky.length === 1 ? ' is' : 's are'} scheduled after ${risky.length === 1 ? 'its' : 'their'} deadline</div>` + html;
-    if (!withDl.length) html = empty('flag', 'No deadlines yet. Open any task and set one, press D on a selected task, or type {friday} in quick add. They’re saved in the task description, so no Todoist Pro needed.');
+    if (!withDl.length) html = empty('flag', 'No deadlines yet. Open any task and set one, press D on a selected task, or type {friday} in quick add. Capri keeps them itself, so no Todoist Pro needed.');
   } else if (v.type === 'focus') {
     title = 'Focus';
     sub = 'Your P1 and P2 tasks across every project';
@@ -1675,17 +1737,21 @@ async function setDueDate(id, date) {
 async function setDeadline(id, date) {
   const t = taskById(id);
   if (!t) return;
-  const prev = t.description || '';
-  const description = withDeadline(prev, date);
-  patchLocal(id, { description });
+  const prev = state.deadlines[id];
+  if (date) state.deadlines[id] = date; else delete state.deadlines[id];
   render();
   try {
-    const updated = await api('POST', `/api/tasks/${id}`, { description });
-    patchLocal(id, updated);
-    render();
+    await saveDeadlines({ [id]: date || null });
+    // A leftover "Deadline:" line from an older version would otherwise still count.
+    if (legacyDeadline(t)) {
+      const description = stripDeadline(t.description);
+      patchLocal(id, { description });
+      await api('POST', `/api/tasks/${id}`, { description });
+      render();
+    }
     toast(date ? `Deadline set: ${dayLabel(date)} (${countdown(date)})` : 'Deadline cleared');
   } catch (err) {
-    patchLocal(id, { description: prev });
+    if (prev) state.deadlines[id] = prev; else delete state.deadlines[id];
     render();
     toast(err.message);
   }
@@ -1823,11 +1889,13 @@ async function duplicateTask(id) {
   if (!t) return;
   try {
     const body = {
-      content: t.content, description: t.description, project_id: t.project_id, section_id: t.section_id || undefined,
+      content: t.content, description: stripDeadline(t.description), project_id: t.project_id, section_id: t.section_id || undefined,
       parent_id: t.parent_id || undefined, labels: t.labels, priority: t.priority,
       due_string: t.due?.string || undefined,
     };
     const copy = await api('POST', '/api/tasks', body);
+    const dl = deadlineDay(t);
+    if (dl) { await saveDeadlines({ [copy.id]: dl }); state.deadlines[copy.id] = dl; }
     state.tasks.push(copy);
     renderAnimated();
     openDetail(copy.id);
@@ -1923,7 +1991,7 @@ async function saveQuick() {
   if (dlText && !dlDate) return toast(`Couldn't understand the deadline “${dlText[1]}” — try {fri}, {nov 2} or {in 2 weeks}`);
   const text = raw.replace(/\s*\{[^}]*\}\s*/g, ' ').trim();
   if (!text) return;
-  const description = withDeadline($('#quick-desc').value.trim(), dlDate || null);
+  const description = $('#quick-desc').value.trim();
   const dueDate = $('#quick-due').value;
   const ctx = state.quickContext || {};
   const btn = $('#quick-save');
@@ -1938,6 +2006,7 @@ async function saveQuick() {
     else if (date) fix.due_date = date.date;
     else if (dueDate && !task.due) fix.due_date = dueDate;
     if (Object.keys(fix).length) task = { ...task, ...(await api('POST', `/api/tasks/${task.id}`, fix)) };
+    if (dlDate) { await saveDeadlines({ [task.id]: dlDate }); state.deadlines[task.id] = dlDate; }
     // Inline adds inherit their project/section/parent unless the text names a #project.
     if (!/(^|\s)#\S/.test(text)) {
       const move = ctx.parent_id ? { parent_id: ctx.parent_id }
@@ -2402,20 +2471,62 @@ async function renameSection(id) {
   catch (err) { s.name = old; render(); toast(err.message); }
 }
 
-// Swaps the section with its neighbour, then renumbers the project's sections 1..n.
-async function moveSection(id, dir) {
+// Swaps the section with its neighbour.
+function moveSection(id, dir) {
   const s = state.sections.find((x) => x.id === id);
   if (!s) return;
-  const list = projectSections(s.project_id);
-  const i = list.indexOf(s);
+  const ids = projectSections(s.project_id).map((x) => x.id);
+  const i = ids.indexOf(id);
   const j = i + dir;
-  if (j < 0 || j >= list.length) return;
+  if (j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  flipColumns(() => reorderSections(ids));
+}
+
+// Puts a project's sections in this order, renumbering them 1..n.
+async function reorderSections(ids) {
+  const list = ids.map((id) => state.sections.find((x) => x.id === id)).filter(Boolean);
   const before = list.map((x) => [x, x.section_order]);
-  [list[i], list[j]] = [list[j], list[i]];
+  if (list.every((x, n) => x.section_order === n + 1)) return;
   list.forEach((x, n) => { x.section_order = n + 1; });
   renderAnimated();
   try { await api('POST', '/api/sections/reorder', { sections: list.map((x) => ({ id: x.id, section_order: x.section_order })) }); }
   catch (err) { before.forEach(([x, o]) => { x.section_order = o; }); renderAnimated(); toast(err.message); }
+}
+
+// Saves the board's column order. keys are the columns on screen, in their new order; hidden
+// (empty) columns keep their place among them.
+function saveColumnOrder(by, keys) {
+  if (by === 'section') return reorderSections(keys);
+  const shown = new Set(keys);
+  let n = 0;
+  const full = boardOrder.keys.map((k) => (shown.has(k) ? keys[n++] : k));
+  const key = colOrderKey(by);
+  state.prefs[key] = full;
+  renderAnimated();
+  api('POST', '/api/prefs', { key, value: full }).catch((err) => toast(err.message));
+}
+
+const movableKeys = (board) => $$('.group-head[data-move]', board).map((h) => h.dataset.move);
+function moveColumn(head, dir) {
+  const board = head.closest('.board');
+  const keys = movableKeys(board);
+  const i = keys.indexOf(head.dataset.move);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= keys.length) return;
+  [keys[i], keys[j]] = [keys[j], keys[i]];
+  flipColumns(() => saveColumnOrder(board.dataset.by, keys));
+}
+
+// Columns slide to their new places instead of jumping.
+function flipColumns(change) {
+  const before = new Map($$('.board .column[data-col]').map((c) => [c.dataset.col, c.getBoundingClientRect().left]));
+  change();
+  if (reducedMotion()) return;
+  for (const c of $$('.board .column[data-col]')) {
+    const dx = (before.get(c.dataset.col) ?? NaN) - c.getBoundingClientRect().left;
+    if (dx) c.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  }
 }
 
 async function deleteSection(id) {
@@ -2730,7 +2841,12 @@ document.addEventListener('change', (e) => {
   const id = state.detailId;
   if (!id) return;
   if (e.target.id === 'd-content' && e.target.value.trim()) updateTask(id, { content: e.target.value.trim() });
-  if (e.target.id === 'd-desc') updateTask(id, { description: withDeadline(e.target.value, deadlineDay(taskById(id))) });
+  if (e.target.id === 'd-desc') {
+    // The box hides an old "Deadline:" line, so saving drops it; keep the deadline itself first.
+    const legacy = legacyDeadline(taskById(id));
+    const keep = legacy && !state.deadlines[id] ? saveDeadlines({ [id]: legacy }).then(() => { state.deadlines[id] = legacy; }) : Promise.resolve();
+    keep.then(() => updateTask(id, { description: e.target.value })).catch((err) => toast(err.message));
+  }
   if (e.target.id === 'd-due') setDue(id, e.target.value.trim() || 'no date');
   if (e.target.id === 'd-due-date') setDueDate(id, e.target.value || null);
   if (e.target.id === 'd-deadline') setDeadline(id, e.target.value || null);
@@ -2881,6 +2997,83 @@ function endHold(drop = false) {
 document.addEventListener('touchend', () => endHold(true));
 document.addEventListener('touchcancel', () => endHold());
 document.addEventListener('contextmenu', (e) => { if (hold) { e.preventDefault(); e.stopPropagation(); } }, true);
+
+// Drag a board column by its heading (mouse). Neighbours slide aside as it passes their middle;
+// letting go saves the new order.
+let colDrag = null;
+document.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || e.pointerType !== 'mouse') return;
+  const head = e.target.closest('.board .group-head[data-move]');
+  if (!head || e.target.closest('button')) return;
+  const col = head.closest('.column');
+  colDrag = { col, board: col.parentElement, x: e.clientX, y: e.clientY, left0: col.offsetLeft, on: false };
+});
+document.addEventListener('pointermove', (e) => {
+  const d = colDrag;
+  if (!d) return;
+  if (!d.on) {
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6) return;
+    d.on = true;
+    d.col.classList.add('col-dragging');
+    document.body.classList.add('col-sorting');
+  }
+  e.preventDefault();
+  // Nudge the board along near the view's edges.
+  const view = $('#view');
+  const vr = view.getBoundingClientRect();
+  if (e.clientX < vr.left + 60) view.scrollLeft -= 14;
+  else if (e.clientX > vr.right - 60) view.scrollLeft += 14;
+  // Where the dragged column's middle is, in the board's own coordinates (no transforms involved).
+  const mid = d.left0 + (e.clientX - d.x) + (view.scrollLeft - (d.scroll0 ??= view.scrollLeft)) + d.col.offsetWidth / 2;
+  const others = $$('.column', d.board).filter((c) => c !== d.col && c.querySelector('.group-head[data-move]'));
+  const before = others.find((c) => mid < c.offsetLeft + c.offsetWidth / 2);
+  const ref = before || others.at(-1)?.nextElementSibling || null;
+  if (ref !== d.col && d.col.nextElementSibling !== ref && others.length) {
+    const was = new Map(others.map((c) => [c, c.offsetLeft]));
+    d.board.insertBefore(d.col, ref);
+    for (const c of others) {
+      const dx = was.get(c) - c.offsetLeft;
+      if (dx) c.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    }
+  }
+  d.col.style.transform = `translateX(${d.left0 + (e.clientX - d.x) + (view.scrollLeft - d.scroll0) - d.col.offsetLeft}px)`;
+});
+function endColDrag() {
+  const d = colDrag;
+  colDrag = null;
+  if (!d?.on) return;
+  document.body.classList.remove('col-sorting');
+  const from = d.col.style.transform;
+  d.col.style.transform = '';
+  d.col.classList.remove('col-dragging');
+  if (from && !reducedMotion()) d.col.animate([{ transform: from }, { transform: 'none' }], { duration: 180, easing: 'ease-out' });
+  const keys = movableKeys(d.board);
+  const by = d.board.dataset.by;
+  const was = by === 'section' ? null : boardOrder.keys.filter((k) => keys.includes(k));
+  if (!was || keys.join() !== was.join()) saveColumnOrder(by, keys);
+}
+document.addEventListener('pointerup', endColDrag);
+document.addEventListener('pointercancel', endColDrag);
+
+// On phones, hold a column's heading to open its menu (there's no right-click).
+let headHold = null;
+document.addEventListener('touchstart', (e) => {
+  const head = e.target.closest('.group-head[data-move], .group-head[data-section]');
+  if (!head || e.touches.length > 1) return;
+  const t = e.touches[0];
+  clearTimeout(headHold?.timer);
+  headHold = { x: t.clientX, y: t.clientY, timer: setTimeout(() => {
+    headHold = null;
+    navigator.vibrate?.(10);
+    swipeEndedAt = Date.now(); // the lift-off isn't a tap
+    if (head.dataset.move) openColumnMenu(head, t.clientX, t.clientY);
+    else openSectionMenu(head.dataset.section, head, t.clientX, t.clientY);
+  }, 450) };
+}, { passive: true });
+document.addEventListener('touchmove', (e) => {
+  if (headHold && Math.hypot(e.touches[0].clientX - headHold.x, e.touches[0].clientY - headHold.y) > 8) { clearTimeout(headHold.timer); headHold = null; }
+}, { passive: true });
+document.addEventListener('touchend', () => { if (headHold) { clearTimeout(headHold.timer); headHold = null; } });
 
 $('#quick-input').addEventListener('input', updateQuickPreview);
 $('#quick-input').addEventListener('scroll', () => { $('#quick-mirror').scrollLeft = $('#quick-input').scrollLeft; });

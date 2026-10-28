@@ -20,7 +20,7 @@ There are no Capri accounts or passwords: **your Todoist token is your login.**
 
 - Each browser or desktop app keeps its own token in an `HttpOnly` cookie (marked `Secure` over HTTPS), valid for a year. *Sign out* in the sidebar clears it.
 - The server never stores tokens. It reads the cookie on each request and uses it to call the Todoist API v1 on that person's behalf, so several people can share one Capri server and each only sees their own Todoist.
-- Capri's own data (sketches) is stored per person under `data/users/<hash of token>/`. The folder name is a one-way SHA-256 hash, so the token can't be recovered from it. Your sketches follow your token, so if you regenerate your Todoist token you start with a fresh sketchbook.
+- Capri's own data (sketches, deadlines, the order of board columns) is stored per person under `data/users/<hash of token>/`. The folder name is a one-way SHA-256 hash, so the token can't be recovered from it. That data follows your token, so if you regenerate your Todoist token you start fresh.
 
 ## Hosting it on a domain (e.g. https://capri.kalculator.lol)
 
@@ -98,7 +98,7 @@ The apps are ad-hoc signed, not notarised (that needs a paid Apple Developer acc
 
 - **Views:** Dashboard, Inbox, Today (with overdue + one-click "reschedule to today"), Upcoming (14 days), Focus (all P1/P2), Board, Completed (last 7 days, with reopen), projects, labels, search
 - **Projects:** list or board layout per project, sections, nested sub-projects and sub-tasks
-- **Board:** every open task as columns, or one project's. Group columns by section, do date (overdue, today, the next six days, no date), priority, project or label. Dragging a card to another column changes that thing, and Add task at a column's foot starts with it. On a phone, hold a card to pick it up; sideways swipes scroll the board. Right-click a section's heading (on the board or in the list) to rename, move or delete it
+- **Board:** every open task as columns, or one project's. Group columns by section, do date (overdue, today, the next six days, no date), priority, project or label. Dragging a card to another column changes that thing, and Add task at a column's foot starts with it. On a phone, hold a card to pick it up; sideways swipes scroll the board. Drag a column by its heading to move it (sections, projects and labels), or right-click it (hold it on a phone) to move it, and to rename or delete a section. Section order is saved in Todoist; project and label column order is saved on Capri's server
 - **Quick add** with natural language and live inline highlighting. Dates are detected as you type, shorthand included: `tod`, `tmr`/`tmrw`, `fri`, `wed 3pm`, `next mon`, `nov 12`, `11/2`, `in 2 weeks`, `tonight`, `at noon`. The date is pulled out of the title and set as the do date; hit × on the date chip if a word wasn't meant as a date. `every …` repeats are passed to Todoist untouched
 - **Task drawer:** edit name, description, due (natural language), project/section, priority, labels, sub-tasks, comments, delete
 - **On phones:** swipe a task right to complete it, left to delete it (with a few seconds to undo); no accidental zooming when tapping fields
@@ -111,7 +111,7 @@ The apps are ad-hoc signed, not notarised (that needs a paid Apple Developer acc
 ### New in this version
 
 - **Liquid glass UI** — frosted translucent panels over a slowly drifting colour backdrop, in light and dark, with a custom line-icon set (the date badge is a little calendar showing the day)
-- **Deadlines** — separate from the do date. Set one in the task drawer (date picker + quick chips), in quick add (date pill or `{friday}`), or press `D`. Deadlines are saved as a `Deadline: YYYY-MM-DD` line at the end of the task description, so they work without Todoist Pro and still show in the Todoist app. Countdown badges, a Deadlines view, a "deadline reached" group in Today, a heads-up banner, and a warning when a task is scheduled after its deadline
+- **Deadlines** — separate from the do date. Set one in the task drawer (date picker + quick chips), in quick add (date pill or `{friday}`), or press `D`. Capri keeps deadlines on its own server under your account, so they work without Todoist Pro (they don't show in the Todoist app). Older `Deadline: YYYY-MM-DD` lines in task descriptions are moved over automatically. Countdown badges, a Deadlines view, a "deadline reached" group in Today, a heads-up banner, and a warning when a task is scheduled after its deadline
 - **Sketches** — a drawing pad (pen, highlighter, eraser, colours, sizes, undo/redo, pressure on pen tablets). Save sketches on their own or attach them to a task; they're stored in `data/drawings/` on this machine
 - **QoL** — hover actions on every task, multi-select (`X` or ⇧/⌘-click) with a bulk bar, drag tasks onto days / projects / Today, collapsible groups, a focus timer (25/5) linked to a task, today's progress ring, duplicate/copy task, date pickers + quick chips, and a `?` shortcut sheet
 - Recurring tasks are protected: bulk reschedules skip them, and one-off changes ask first
