@@ -281,6 +281,30 @@ app.post('/api/sections', requireToken, wrap(async (req, res) => {
   res.json(await td('POST', '/sections', { auth: req.token, body: req.body }));
 }));
 
+// The REST API can't reorder sections, so this one goes through Todoist's sync endpoint.
+app.post('/api/sections/reorder', requireToken, wrap(async (req, res) => {
+  const uuid = crypto.randomUUID();
+  const commands = [{ type: 'section_reorder', uuid, args: { sections: req.body.sections } }];
+  const r = await fetch(TODOIST_API + '/sync', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${req.token}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ commands: JSON.stringify(commands) }),
+  });
+  const data = await r.json().catch(() => null);
+  const status = data?.sync_status?.[uuid];
+  if (!r.ok || status !== 'ok') throw new TodoistError(r.ok ? 400 : r.status, status?.error || data);
+  res.json({ ok: true });
+}));
+
+app.post('/api/sections/:id', requireToken, wrap(async (req, res) => {
+  res.json(await td('POST', `/sections/${encodeURIComponent(req.params.id)}`, { auth: req.token, body: { name: req.body.name } }));
+}));
+
+app.delete('/api/sections/:id', requireToken, wrap(async (req, res) => {
+  await td('DELETE', `/sections/${encodeURIComponent(req.params.id)}`, { auth: req.token });
+  res.json({ ok: true });
+}));
+
 app.get('/api/tasks/:id/comments', requireToken, wrap(async (req, res) => {
   res.json({ comments: await tdAll(req.token, '/comments', { task_id: req.params.id }) });
 }));

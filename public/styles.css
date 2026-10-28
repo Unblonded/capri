@@ -341,6 +341,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .column { width: 290px; flex-shrink: 0; padding: 10px; display: flex; flex-direction: column; transition: outline-color .15s, background-color .15s; outline: 2px dashed transparent; outline-offset: -2px; }
 .column .group-head, :root[data-theme] .board .column .group-head { position: static; border: 0; background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 0; padding: 12px 10px 10px; }
 .column .group-head.today { color: var(--accent); }
+.group-head[data-section].menu-on { color: var(--accent); }
 .column .group-head.p1 { color: var(--p1); }
 .column .group-head.p2 { color: var(--p2); }
 .column .group-head.p3 { color: var(--p3); }

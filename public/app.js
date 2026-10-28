@@ -21,6 +21,9 @@ const ICONS = {
   repeat: '<path d="M17 2.5l3 3-3 3"/><path d="M4 11.5v-2a4 4 0 0 1 4-4h12"/><path d="M7 21.5l-3-3 3-3"/><path d="M20 12.5v2a4 4 0 0 1-4 4H4"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M2.5 12h2M19.5 12h2M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
   nextweek: '<path d="M4 12h11M10 6l6 6-6 6M20 5v14"/>',
   pencil: '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/><path d="M14.5 5.5l3 3"/>',
   marker: '<path d="M9.5 14.5L5 19h4.5l2-2"/><path d="M14 4l6 6-8.5 8.5-6-6z"/>',
@@ -715,8 +718,35 @@ function closeTaskMenu() {
   if (!ctxMenu) return;
   ctxMenu.remove();
   ctxMenu = null;
-  if (isTouch() && !state.detailId) clearSelection();
+  clearSelection();
+  if (state.detailId) { // the drawer's task keeps its highlight
+    state.selectedId = state.detailId;
+    $$(`[data-task="${state.detailId}"]`).forEach((el) => el.classList.add('selected'));
+  }
+  $$('.group-head.menu-on').forEach((el) => el.classList.remove('menu-on'));
 }
+
+// Shared by the task and section menus: places the menu at the pointer, kept on screen.
+function showMenu(menu, x, y) {
+  document.body.appendChild(menu);
+  // offsetWidth/Height ignore the opening animation's scale, so the size is real.
+  const gap = 8;
+  menu.style.maxHeight = `${innerHeight - gap * 2}px`;
+  const w = menu.offsetWidth;
+  const h = menu.offsetHeight;
+  const left = x + w + gap > innerWidth ? x - w : x;   // flip left near the right edge
+  const top = y + h + gap > innerHeight ? y - h : y;   // open upward when there's no room below
+  menu.style.left = `${Math.max(gap, Math.min(left, innerWidth - w - gap))}px`;
+  menu.style.top = `${Math.max(gap, Math.min(top, innerHeight - h - gap))}px`;
+  menu.style.transformOrigin = `${left < x ? 'right' : 'left'} ${top < y ? 'bottom' : 'top'}`;
+  ctxMenu = menu;
+  menu.querySelector('button')?.focus({ preventScroll: true });
+}
+const menuItem = (items, it) => {
+  if (it === '-') return '<div class="ctx-sep"></div>';
+  const [icon, label, , cls = ''] = it;
+  return `<button class="dd-opt ${cls}" role="menuitem" data-i="${items.indexOf(it)}">${ic(icon)}<span class="dd-text">${esc(label)}</span></button>`;
+};
 
 function openTaskMenu(id, x, y) {
   const t = taskById(id);
@@ -747,13 +777,11 @@ function openTaskMenu(id, x, y) {
   menu.className = 'dd-menu ctx-menu';
   menu.setAttribute('role', 'menu');
   menu.innerHTML = items.map((it) => {
-    if (it === '-') return '<div class="ctx-sep"></div>';
     if (it === 'priority') {
       return `<div class="ctx-prio" role="group" aria-label="Priority">${[4, 3, 2, 1].map((p) =>
         `<button class="ctx-p ${prioClass(p)} ${t.priority === p ? 'on' : ''}" data-ctx-prio="${p}" title="Priority ${5 - p}">P${5 - p}</button>`).join('')}</div>`;
     }
-    const [icon, label, , cls = ''] = it;
-    return `<button class="dd-opt ${cls}" role="menuitem" data-i="${items.indexOf(it)}">${ic(icon)}<span class="dd-text">${esc(label)}</span></button>`;
+    return menuItem(items, it);
   }).join('');
   if (repeats) menu.insertAdjacentHTML('afterbegin', `<div class="ctx-note">${ic('repeat')} Repeats ${esc(t.due.string)}</div>`);
 
@@ -766,25 +794,49 @@ function openTaskMenu(id, x, y) {
     if (prio) setPriority(id, Number(prio.dataset.ctxPrio));
     else items[opt.dataset.i][2]();
   });
-  document.body.appendChild(menu);
-  // Keep it on screen. offsetWidth/Height ignore the opening animation's scale, so the size is real.
-  const gap = 8;
-  menu.style.maxHeight = `${innerHeight - gap * 2}px`;
-  const w = menu.offsetWidth;
-  const h = menu.offsetHeight;
-  const left = x + w + gap > innerWidth ? x - w : x;   // flip left near the right edge
-  const top = y + h + gap > innerHeight ? y - h : y;   // open upward when there's no room below
-  menu.style.left = `${Math.max(gap, Math.min(left, innerWidth - w - gap))}px`;
-  menu.style.top = `${Math.max(gap, Math.min(top, innerHeight - h - gap))}px`;
-  menu.style.transformOrigin = `${left < x ? 'right' : 'left'} ${top < y ? 'bottom' : 'top'}`;
-  ctxMenu = menu;
+  showMenu(menu, x, y);
   state.selectedId = id;
   $$('.task.selected').forEach((el) => el.classList.toggle('selected', el.dataset.task === id));
   $(`.task[data-task="${id}"]`)?.classList.add('selected');
-  menu.querySelector('button')?.focus({ preventScroll: true });
+}
+
+// Right-click on a section's heading (list or board): rename, reorder or delete it.
+function openSectionMenu(id, head, x, y) {
+  const s = state.sections.find((x) => x.id === id);
+  if (!s) return;
+  closeDropdown();
+  closeTaskMenu();
+  const siblings = projectSections(s.project_id);
+  const i = siblings.indexOf(s);
+  const board = !!head.closest('.board');
+  const items = [
+    ['pencil', 'Rename', () => renameSection(id)],
+    i > 0 && [board ? 'back' : 'up', board ? 'Move left' : 'Move up', () => moveSection(id, -1)],
+    i < siblings.length - 1 && [board ? 'arrow' : 'down', board ? 'Move right' : 'Move down', () => moveSection(id, 1)],
+    '-',
+    ['trash', 'Delete section', () => deleteSection(id), 'danger'],
+  ].filter(Boolean);
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu ctx-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = items.map((it) => menuItem(items, it)).join('');
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const opt = e.target.closest('[data-i]');
+    if (!opt) return;
+    closeTaskMenu();
+    items[opt.dataset.i][2]();
+  });
+  showMenu(menu, x, y);
+  head.classList.add('menu-on');
 }
 
 document.addEventListener('contextmenu', (e) => {
+  const head = e.target.closest('.group-head[data-section]');
+  if (head && !e.target.closest('.task')) {
+    e.preventDefault();
+    return openSectionMenu(head.dataset.section, head, e.clientX, e.clientY);
+  }
   const row = e.target.closest('.task[data-task]');
   if (!row || e.target.closest('input, textarea')) return;
   e.preventDefault();
@@ -1084,10 +1136,10 @@ function taskTree(list, opts, mode) {
 const collapsed = new Set(store.get('collapsed', []));
 
 // key makes the group collapsible; due makes it a drop target that reschedules.
-function group(title, body, { cls = '', sub = '', extra = '', key = '', due = '' } = {}) {
+function group(title, body, { cls = '', sub = '', extra = '', key = '', due = '', section = '' } = {}) {
   const k = key && `${state.view.type}:${key}`;
   return `<section class="group ${k && collapsed.has(k) ? 'collapsed' : ''}" ${due ? `data-due="${due}"` : ''}>
-    <div class="group-head ${cls}">${k ? `<button class="caret" data-collapse="${esc(k)}">${ic('chevron')}</button>` : ''}${esc(title)}<span class="muted">${esc(sub)}</span><span class="spacer"></span>${extra}</div>
+    <div class="group-head ${cls}" ${section ? `data-section="${esc(section)}"` : ''}>${k ? `<button class="caret" data-collapse="${esc(k)}">${ic('chevron')}</button>` : ''}${esc(title)}<span class="muted">${esc(sub)}</span><span class="spacer"></span>${extra}</div>
     <div class="group-body">${body}</div></section>`;
 }
 
@@ -1117,14 +1169,14 @@ function boardColumns(tasks, by, project) {
   const base = project ? { project_id: project.id } : {};
   const t = today();
   const cols = [];
-  const col = (key, name, test, { drop = null, add = base, sub = '', cls = '', keep = true } = {}) =>
-    cols.push({ key, name, items: tasks.filter(test), drop, add, sub, cls, keep });
+  const col = (key, name, test, { drop = null, add = base, sub = '', cls = '', keep = true, section = '' } = {}) =>
+    cols.push({ key, name, items: tasks.filter(test), drop, add, sub, cls, keep, section });
   if (by === 'section') {
-    const sections = state.sections.filter((s) => s.project_id === project.id && !s.is_archived).sort((a, b) => a.section_order - b.section_order);
+    const sections = projectSections(project.id);
     col('none', project.inbox_project ? 'Inbox' : 'No section', (x) => !x.section_id,
       { drop: { section: '', project: project.id }, keep: !sections.length });
     for (const s of sections) col(s.id, s.name, (x) => x.section_id === s.id,
-      { drop: { section: s.id, project: project.id }, add: { project_id: project.id, section_id: s.id } });
+      { drop: { section: s.id, project: project.id }, add: { project_id: project.id, section_id: s.id }, section: s.id });
   } else if (by === 'due') {
     col('overdue', 'Overdue', (x) => dueDay(x) && dueDay(x) < t, { cls: 'overdue', keep: false });
     for (let i = 0; i < 7; i++) {
@@ -1160,7 +1212,7 @@ function renderBoard(tasks, by, project) {
     const ids = new Set(c.items.map((x) => x.id));
     const cards = sortTasks(c.items.filter((x) => !ids.has(x.parent_id)));
     return `<div class="column glass ${c.drop ? '' : 'no-drop'}" data-col="${esc(c.key)}" ${c.drop ? `data-drop='${esc(JSON.stringify(c.drop))}'` : ''}>
-      <div class="group-head ${c.cls}">${esc(c.name)} <span class="muted">${c.sub ? esc(c.sub) + ' · ' : ''}${cards.length}</span></div>
+      <div class="group-head ${c.cls}" ${c.section ? `data-section="${esc(c.section)}"` : ''}>${esc(c.name)} <span class="muted">${c.sub ? esc(c.sub) + ' · ' : ''}${cards.length}</span></div>
       <div class="col-body">${cards.map((x) => taskRow(x, { showProject })).join('') || '<div class="col-empty">Drop tasks here</div>'}</div>
       ${c.drop ? inlineAdd(c.add) : ''}
     </div>`;
@@ -1292,7 +1344,7 @@ function renderView() {
       actions = `<div class="seg"><button data-layout="list" class="${layout === 'list' ? 'on' : ''}">List</button><button data-layout="board" class="${layout === 'board' ? 'on' : ''}">Board</button></div>`
         + sortControl()
         + `<button class="btn sm" data-act="add-section">${ic('plus')} Section</button>`;
-      const sections = state.sections.filter((s) => s.project_id === p.id && !s.is_archived).sort((a, b) => a.section_order - b.section_order);
+      const sections = projectSections(p.id);
       const buckets = [{ id: null, name: p.inbox_project ? 'Inbox' : 'No section' }, ...sections];
       if (layout === 'board') {
         viewEl.classList.add('wide', 'board-view');
@@ -1304,7 +1356,7 @@ function renderView() {
           const items = tasks.filter((x) => (x.section_id || null) === s.id);
           if (s.id === null && !items.length && sections.length) return '';
           const body = taskTree(items, { showProject: false }) + inlineAdd({ project_id: p.id, section_id: s.id });
-          return s.id === null ? `<section class="group">${body}</section>` : group(s.name, body, { sub: String(items.length), key: s.id });
+          return s.id === null ? `<section class="group">${body}</section>` : group(s.name, body, { sub: String(items.length), key: s.id, section: s.id });
         }).join('');
       }
     }
@@ -2250,13 +2302,13 @@ async function deleteDrawing() {
 // ---------- misc actions ----------
 
 // Electron (the desktop app) doesn't support window.prompt, so ask with our own dialog.
-function askText(title, { placeholder = '', ok = 'Create' } = {}) {
+function askText(title, { placeholder = '', ok = 'Create', value = '' } = {}) {
   return new Promise((resolve) => {
     const modal = document.createElement('div');
     modal.className = 'modal ask-modal';
     modal.innerHTML = `<form class="modal-card glass ask-card">
       <h3>${esc(title)}</h3>
-      <input type="text" placeholder="${esc(placeholder)}" autocomplete="off" />
+      <input type="text" placeholder="${esc(placeholder)}" value="${esc(value)}" autocomplete="off" />
       <div class="ask-actions"><button type="button" class="btn" data-ask-cancel>Cancel</button><button class="btn primary">${esc(ok)}</button></div>
     </form>`;
     const input = modal.querySelector('input');
@@ -2267,6 +2319,7 @@ function askText(title, { placeholder = '', ok = 'Create' } = {}) {
     modal.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') done(null); });
     document.body.appendChild(modal);
     input.focus();
+    input.select();
   });
 }
 
@@ -2333,6 +2386,54 @@ async function createSection() {
     state.sections.push(s);
     render();
   } catch (err) { toast(err.message); }
+}
+
+const projectSections = (projectId) => state.sections
+  .filter((s) => s.project_id === projectId && !s.is_archived).sort((a, b) => a.section_order - b.section_order);
+
+async function renameSection(id) {
+  const s = state.sections.find((x) => x.id === id);
+  const name = s && await askText('Rename section', { value: s.name, ok: 'Rename' });
+  if (!name || name === s.name) return;
+  const old = s.name;
+  s.name = name;
+  render();
+  try { await api('POST', `/api/sections/${id}`, { name }); }
+  catch (err) { s.name = old; render(); toast(err.message); }
+}
+
+// Swaps the section with its neighbour, then renumbers the project's sections 1..n.
+async function moveSection(id, dir) {
+  const s = state.sections.find((x) => x.id === id);
+  if (!s) return;
+  const list = projectSections(s.project_id);
+  const i = list.indexOf(s);
+  const j = i + dir;
+  if (j < 0 || j >= list.length) return;
+  const before = list.map((x) => [x, x.section_order]);
+  [list[i], list[j]] = [list[j], list[i]];
+  list.forEach((x, n) => { x.section_order = n + 1; });
+  renderAnimated();
+  try { await api('POST', '/api/sections/reorder', { sections: list.map((x) => ({ id: x.id, section_order: x.section_order })) }); }
+  catch (err) { before.forEach(([x, o]) => { x.section_order = o; }); renderAnimated(); toast(err.message); }
+}
+
+async function deleteSection(id) {
+  const s = state.sections.find((x) => x.id === id);
+  if (!s) return;
+  const n = state.tasks.filter((t) => t.section_id === id && !t.checked).length;
+  const body = n
+    ? `“${s.name}” and the ${n} task${n === 1 ? '' : 's'} in it will be deleted from Todoist. This can't be undone.`
+    : `“${s.name}” will be deleted from Todoist.`;
+  if (!(await askConfirm('Delete this section?', { body, ok: 'Delete', danger: true }))) return;
+  const sections = state.sections;
+  const tasks = state.tasks;
+  state.sections = sections.filter((x) => x !== s);
+  state.tasks = tasks.filter((t) => t.section_id !== id);
+  if (state.detailId && !taskById(state.detailId)) closeDetail();
+  renderAnimated();
+  try { await api('DELETE', `/api/sections/${id}`); }
+  catch (err) { state.sections = sections; state.tasks = tasks; render(); toast(err.message); }
 }
 
 async function rescheduleOverdue(btn) {
