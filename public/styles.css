@@ -308,6 +308,10 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .sched-banner { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
 .sched-banner b { font-weight: 650; margin: 0 2px; color: var(--text); }
 .sched-banner.now { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+/* One sentence that wraps as a whole on narrow screens, instead of each piece squeezing into its own column. */
+.sched-banner .sb-text { flex: 1; min-width: 0; }
+.sched-banner .sb-go { white-space: nowrap; }
+.sched-banner .ic { flex-shrink: 0; }
 :root[data-theme="capri"] .sblock.now { box-shadow: 0 0 0 2px rgba(255, 46, 92, .5), 0 0 18px rgba(255, 46, 92, .45); }
 
 /* schedule tabs, the right-now card and the schedule editor */

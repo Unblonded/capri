@@ -1967,8 +1967,8 @@ function scrollScheduleToNow() {
 // On Today: what's on now and how long it has left, or what's next.
 function scheduleBanner() {
   const { now, cur, next } = nowInfo();
-  if (cur) return `<div class="banner sched-banner now" data-nav="schedule">${ic('clock')} Now: <b>${esc(cur.title)}</b> · ${lengthText(toMin(cur.end) - now)} left, until ${esc(fmtTime(cur.end))} <span class="spacer"></span> Schedule →</div>`;
-  if (next) return `<div class="banner sched-banner" data-nav="schedule">${ic('clock')} Next: <b>${esc(next.title)}</b> at ${esc(fmtTime(next.start))} · in ${lengthText(toMin(next.start) - now)} <span class="spacer"></span> Schedule →</div>`;
+  if (cur) return `<div class="banner sched-banner now" data-nav="schedule">${ic('clock')}<span class="sb-text">Now: <b>${esc(cur.title)}</b> · ${lengthText(toMin(cur.end) - now)} left, until ${esc(fmtTime(cur.end))}</span><span class="sb-go">Schedule →</span></div>`;
+  if (next) return `<div class="banner sched-banner" data-nav="schedule">${ic('clock')}<span class="sb-text">Next: <b>${esc(next.title)}</b> at ${esc(fmtTime(next.start))} · in ${lengthText(toMin(next.start) - now)}</span><span class="sb-go">Schedule →</span></div>`;
   return '';
 }
 
