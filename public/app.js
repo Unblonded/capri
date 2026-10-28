@@ -77,7 +77,7 @@ function calIcon(day) {
 const prioClass = (p) => (p === 4 ? 'p1' : p === 3 ? 'p2' : p === 2 ? 'p3' : 'p4');
 
 const state = {
-  projects: [], sections: [], labels: [], tasks: [], drawings: [], schedule: {},
+  projects: [], sections: [], labels: [], tasks: [], drawings: [], schedule: { schedules: [], days: {} },
   deadlines: {}, prefs: {}, // kept on Capri's server, per person
   view: { type: 'today' },
   selectedId: null,
@@ -1529,12 +1529,11 @@ function openLabelMenu(name, x, y, anchor) {
 }
 
 // ---------- schedule ----------
-// Time blocks for a day, typed the way you'd write them: "go outside 3:05 - 4:03", "5pm-8pm do something".
+// Time blocks, typed the way you'd write them: "go outside 3:05 - 4:03", "5pm-8pm do something".
 const t0 = () => today();
 const toMin = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
 const fromMin = (n) => `${pad(Math.floor(n / 60))}:${pad(n % 60)}`;
 const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
-const dayBlocks = (day) => state.schedule?.[day] || [];
 const blockSpan = (b) => `${fmtTime(b.start)} – ${fmtTime(b.end)}`;
 const lengthText = (mins) => (mins >= 60 ? `${Math.floor(mins / 60)}h${mins % 60 ? ` ${mins % 60}m` : ''}` : `${mins}m`);
 
@@ -1571,15 +1570,56 @@ function parseBlock(line) {
   return { title: title.slice(0, 200), start: fromMin(start), end: fromMin(Math.min(end, 23 * 60 + 59)) };
 }
 
-async function saveDay(day, blocks) {
-  const sorted = [...blocks].sort((x, y) => toMin(x.start) - toMin(y.start));
-  state.schedule = { ...state.schedule, [day]: sorted };
-  if (!sorted.length) delete state.schedule[day];
+// Repeating schedules: each has a name, the weekdays it runs on and its blocks. A date's plan is the
+// schedule for its weekday plus any one-off blocks added just for that date; ticks are kept per date.
+const WEEK = [1, 2, 3, 4, 5, 6, 0]; // Monday first
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const schedules = () => state.schedule?.schedules || [];
+const weekdayName = (day) => parseDay(day).toLocaleDateString([], { weekday: 'long' });
+const scheduleById = (id) => schedules().find((s) => s.id === id);
+const scheduleFor = (day) => schedules().find((s) => s.days.includes(parseDay(day).getDay())) || null;
+const dayEntry = (day) => state.schedule?.days?.[day] || { extra: [], done: [] };
+function daysText(days) {
+  const set = new Set(days);
+  if (set.size === 7) return 'Every day';
+  if (set.size === 5 && [1, 2, 3, 4, 5].every((d) => set.has(d))) return 'Weekdays';
+  if (set.size === 2 && set.has(0) && set.has(6)) return 'Weekends';
+  return WEEK.filter((d) => set.has(d)).map((d) => DAY_SHORT[d]).join(' ') || 'No days yet';
+}
+
+// Everything planned on a date, oldest first; `tpl` marks blocks that come from a repeating schedule.
+function dayBlocks(day) {
+  const s = scheduleFor(day);
+  const { extra = [], done = [] } = dayEntry(day);
+  return [...(s?.blocks || []).map((b) => ({ ...b, tpl: s.id })), ...extra]
+    .map((b) => ({ ...b, done: done.includes(b.id) }))
+    .sort((x, y) => toMin(x.start) - toMin(y.start));
+}
+
+const byStart = (list) => [...list].sort((x, y) => toMin(x.start) - toMin(y.start));
+async function saveSchedules(next) {
+  state.schedule = { ...state.schedule, schedules: next };
   render();
-  try { await api('POST', '/api/schedule', { day, blocks: sorted }); }
+  try { await api('POST', '/api/schedule', { schedules: next }); }
   catch (err) { toast(err.message); }
 }
-const schedDay = () => (state.view.type === 'schedule' && /^\d{4}-\d{2}-\d{2}$/.test(state.view.id || '') ? state.view.id : today());
+async function saveDayEntry(day, { extra, done }) {
+  const days = { ...state.schedule.days };
+  if (extra.length || done.length) days[day] = { extra: byStart(extra), done };
+  else delete days[day];
+  state.schedule = { ...state.schedule, days };
+  render();
+  try { await api('POST', '/api/schedule', { day, extra: byStart(extra), done }); }
+  catch (err) { toast(err.message); }
+}
+const updateSchedule = (id, change) => saveSchedules(schedules().map((s) => (s.id === id ? { ...s, ...change(s) } : s)));
+
+// What the schedule page is showing: a date, or one schedule to edit (`#/schedule/s:<id>`).
+function schedTarget() {
+  const id = state.view.type === 'schedule' ? state.view.id || '' : '';
+  if (id.startsWith('s:') && scheduleById(id.slice(2))) return { tpl: id.slice(2) };
+  return { day: /^\d{4}-\d{2}-\d{2}$/.test(id) ? id : today() };
+}
 const newBlockId = () => Math.random().toString(36).slice(2, 10);
 
 function addBlocks() {
@@ -1588,10 +1628,11 @@ function addBlocks() {
   if (!lines.length) return;
   const parsed = lines.map(parseBlock);
   const bad = lines.filter((_, i) => !parsed[i]);
-  const good = parsed.filter(Boolean);
+  const good = parsed.filter(Boolean).map((g) => ({ id: newBlockId(), ...g }));
   if (!good.length) return toast('Add a time range, like “go outside 3:05 - 4:03”');
-  const day = schedDay();
-  saveDay(day, [...dayBlocks(day), ...good.map((g) => ({ id: newBlockId(), ...g }))]);
+  const target = schedTarget();
+  if (target.tpl) updateSchedule(target.tpl, (s) => ({ blocks: byStart([...s.blocks, ...good]) }));
+  else { const e = dayEntry(target.day); saveDayEntry(target.day, { extra: [...e.extra, ...good], done: e.done }); }
   toast(good.length === 1 ? `Added “${good[0].title}” · ${blockSpan(good[0])}` : `Added ${good.length} blocks`);
   requestAnimationFrame(() => {
     const box = $('#sched-input');
@@ -1599,7 +1640,7 @@ function addBlocks() {
     box.value = bad.join('\n'); // anything that didn't read stays in the box to fix
     if (bad.length) toast(`Couldn't read: ${bad[0]}`);
     updateSchedPreview();
-    box.focus();
+    box.focus({ preventScroll: true });
   });
 }
 
@@ -1643,38 +1684,105 @@ function laneBlocks(blocks) {
   return out;
 }
 
-const HOUR_PX = 64;
-function scheduleHtml(day) {
-  const blocks = dayBlocks(day);
-  const isToday = day === today();
+// What's on right now and for how long, or how long you're free until the next thing.
+function nowInfo() {
   const now = nowMin();
-  const first = Math.min(8, ...blocks.map((b) => Math.floor(toMin(b.start) / 60)), isToday ? Math.floor(now / 60) : 24);
-  const last = Math.max(22, ...blocks.map((b) => Math.ceil(toMin(b.end) / 60)), isToday ? Math.ceil(now / 60) : 0);
+  const blocks = dayBlocks(today()).filter((b) => !b.done);
+  const cur = blocks.filter((b) => toMin(b.start) <= now && now < toMin(b.end)).sort((x, y) => toMin(x.end) - toMin(y.end))[0];
+  const next = blocks.find((b) => toMin(b.start) > now && b !== cur);
+  return { now, cur, next };
+}
+
+function heroHtml() {
+  const { now, cur, next } = nowInfo();
+  const s = scheduleFor(today());
+  const nextLine = next ? `Next: <b>${esc(next.title)}</b> at ${esc(fmtTime(next.start))} · for ${lengthText(toMin(next.end) - toMin(next.start))}` : 'Nothing after this today';
+  if (cur) {
+    const total = toMin(cur.end) - toMin(cur.start);
+    const left = toMin(cur.end) - now;
+    return `<div class="sched-hero now glass" id="sched-hero">
+      <div class="sh-top"><span class="sh-label">Right now</span>${s ? `<span class="sh-from">${esc(s.name)}</span>` : ''}</div>
+      <div class="sh-title">${esc(cur.title)}</div>
+      <div class="sh-left"><b>${lengthText(left)}</b> left · until ${esc(fmtTime(cur.end))}</div>
+      <div class="sh-bar"><span style="width:${((total - left) / total) * 100}%"></span></div>
+      <div class="sh-next">${nextLine}</div>
+    </div>`;
+  }
+  return `<div class="sched-hero glass" id="sched-hero">
+    <div class="sh-top"><span class="sh-label">Right now</span>${s ? `<span class="sh-from">${esc(s.name)}</span>` : ''}</div>
+    <div class="sh-title">${next ? 'Free time' : dayBlocks(today()).length ? 'All done for today' : 'Nothing planned today'}</div>
+    <div class="sh-left">${next ? `<b>${lengthText(toMin(next.start) - now)}</b> until ${esc(next.title)} at ${esc(fmtTime(next.start))}` : schedules().length ? 'Enjoy the rest of the day.' : 'Make a schedule below and it repeats on the days you pick.'}</div>
+  </div>`;
+}
+
+// Tabs: the day view, then each schedule with its days, then a way to add one.
+function schedTabs(target) {
+  return `<div class="sched-tabs">
+    <button class="stab ${target.day ? 'on' : ''}" data-act="sched-open" data-id="">${ic('clock')} ${target.day && target.day !== today() ? esc(dayLabel(target.day)) : 'Today'}</button>
+    ${schedules().map((s) => `<button class="stab ${target.tpl === s.id ? 'on' : ''}" data-act="sched-open" data-id="s:${esc(s.id)}">${esc(s.name)}${daysText(s.days).toLowerCase() === s.name.toLowerCase() ? '' : `<span class="stab-days">${esc(daysText(s.days))}</span>`}</button>`).join('')}
+    <button class="stab add" data-act="sched-new">${ic('plus')} New schedule</button>
+  </div>`;
+}
+
+const HOUR_PX = 64;
+function timelineHtml(blocks, { day = '', tpl = '', live = false }) {
+  const now = nowMin();
+  const first = Math.min(8, ...blocks.map((b) => Math.floor(toMin(b.start) / 60)), live ? Math.floor(now / 60) : 24);
+  const last = Math.max(22, ...blocks.map((b) => Math.ceil(toMin(b.end) / 60)), live ? Math.ceil(now / 60) : 0);
   const top = (min) => ((min - first * 60) / 60) * HOUR_PX;
   const hours = Array.from({ length: last - first + 1 }, (_, i) => first + i);
-  const planned = blocks.reduce((n, b) => n + toMin(b.end) - toMin(b.start), 0);
-  return `<div class="sched">
-    <div class="sched-add glass">
-      <textarea id="sched-input" rows="1" placeholder="go outside 3:05 - 4:03   (one per line, paste a whole list)"></textarea>
-      <button class="btn primary sm" data-act="sched-add">${ic('plus')} Add</button>
-    </div>
-    <div class="sched-preview" id="sched-preview"></div>
-    ${blocks.length ? `<div class="sched-sum muted small">${blocks.length} block${blocks.length === 1 ? '' : 's'} · ${lengthText(planned)} planned</div>` : ''}
-    <div class="sched-grid" style="height:${(last - first) * HOUR_PX}px" data-first="${first}" data-day="${day}">
-      ${hours.map((h) => `<div class="sched-hour" style="top:${top(h * 60)}px"><span>${h < 24 ? esc(fmtTime(fromMin(h * 60)).replace(':00', '')) : ''}</span></div>`).join('')}
-      ${laneBlocks(blocks).map(({ b, lane, lanes }) => {
-        const s = toMin(b.start); const e = toMin(b.end);
-        const when = b.done ? 'done' : isToday && now >= e ? 'past' : isToday && now >= s ? 'now' : '';
-        const h = Math.max(26, top(e) - top(s) - 3);
-        return `<div class="sblock ${when} ${h < 44 ? 'short' : ''}" data-block="${esc(b.id)}" data-day="${day}"
-          style="top:${top(s) + 1}px;height:${h}px;left:calc(${(lane / lanes) * 100}% + 56px - ${(lane / lanes) * 56}px);width:calc(${100 / lanes}% - ${56 / lanes}px - 4px)">
-          <div class="sb-title">${b.done ? ic('check') : ''}${esc(b.title)}</div>
-          <div class="sb-time">${esc(blockSpan(b))} · ${lengthText(e - s)}</div>
-        </div>`;
-      }).join('')}
-      ${isToday ? `<div class="sched-now" style="top:${top(now)}px"></div>` : ''}
-      ${blocks.length ? '' : `<div class="sched-empty muted">Nothing planned${isToday ? ' today' : ''}. Type something like “go outside 3:05 - 4:03” above, or click a time.</div>`}
-    </div>
+  return `<div class="sched-scroll"><div class="sched-grid" style="height:${(last - first) * HOUR_PX}px" data-first="${first}" data-day="${day}" data-live="${live ? 1 : ''}">
+    ${hours.map((h) => `<div class="sched-hour" style="top:${top(h * 60)}px"><span>${h < 24 ? esc(fmtTime(fromMin(h * 60)).replace(':00', '')) : ''}</span></div>`).join('')}
+    ${laneBlocks(blocks).map(({ b, lane, lanes }) => {
+      const s = toMin(b.start); const e = toMin(b.end);
+      const when = b.done ? 'done' : live && now >= e ? 'past' : live && now >= s ? 'now' : '';
+      const h = Math.max(26, top(e) - top(s) - 3);
+      return `<div class="sblock ${when} ${h < 44 ? 'short' : ''} ${day && !b.tpl ? 'oneoff' : ''}" data-block="${esc(b.id)}" data-day="${day}" data-tpl="${esc(tpl || b.tpl || '')}"
+        style="top:${top(s) + 1}px;height:${h}px;left:calc(${(lane / lanes) * 100}% + 56px - ${(lane / lanes) * 56}px);width:calc(${100 / lanes}% - ${56 / lanes}px - 4px)">
+        <div class="sb-title">${b.done ? ic('check') : ''}${esc(b.title)}</div>
+        <div class="sb-time">${esc(blockSpan(b))} · ${lengthText(e - s)}</div>
+      </div>`;
+    }).join('')}
+    ${live ? `<div class="sched-now" style="top:${top(now)}px"></div>` : ''}
+  </div></div>`;
+}
+
+const addBox = (placeholder) => `<div class="sched-add glass">
+    <textarea id="sched-input" rows="1" placeholder="${esc(placeholder)}"></textarea>
+    <button class="btn primary sm" data-act="sched-add">${ic('plus')} Add</button>
+  </div>
+  <div class="sched-preview" id="sched-preview"></div>`;
+
+function scheduleHtml(target) {
+  if (target.tpl) {
+    const s = scheduleById(target.tpl);
+    const planned = s.blocks.reduce((n, b) => n + toMin(b.end) - toMin(b.start), 0);
+    const taken = (d) => schedules().find((o) => o.id !== s.id && o.days.includes(d));
+    return `<div class="sched">${schedTabs(target)}
+      <div class="tpl-head glass">
+        <input class="tpl-name" id="tpl-name" value="${esc(s.name)}" maxlength="60" aria-label="Schedule name" />
+        <div class="tpl-days" role="group" aria-label="Days this schedule runs">${WEEK.map((d) => {
+          const other = taken(d);
+          return `<button class="tday ${s.days.includes(d) ? 'on' : ''}" data-act="tpl-day" data-d="${d}" title="${other && !s.days.includes(d) ? `${DAY_SHORT[d]} uses ${esc(other.name)}; tap to switch it here` : DAY_SHORT[d]}">${DAY_SHORT[d].slice(0, 2)}${other && !s.days.includes(d) ? '<i></i>' : ''}</button>`;
+        }).join('')}</div>
+        <div class="tpl-meta muted small">${esc(daysText(s.days))} · ${s.blocks.length} block${s.blocks.length === 1 ? '' : 's'} · ${lengthText(planned)}</div>
+        <button class="btn ghost sm danger" data-act="tpl-delete">${ic('trash')} Delete schedule</button>
+      </div>
+      ${addBox('wake up 7 - 7:30   (one per line, paste a whole routine)')}
+      ${timelineHtml(s.blocks, { tpl: s.id })}
+      ${s.blocks.length ? '' : '<div class="sched-empty muted">Add the blocks for a typical day. They repeat on every day you picked above.</div>'}
+    </div>`;
+  }
+  const day = target.day;
+  const isToday = day === today();
+  const s = scheduleFor(day);
+  const blocks = dayBlocks(day);
+  return `<div class="sched">${schedTabs(target)}
+    ${isToday ? heroHtml() : ''}
+    <div class="sched-using muted small">${s ? `Using <a href="#/schedule/s:${esc(s.id)}">${esc(s.name)}</a> on ${weekdayName(day)}s` : `No schedule runs on ${weekdayName(day)}s`}${blocks.length ? ` · ${blocks.length} block${blocks.length === 1 ? '' : 's'}` : ''}</div>
+    ${addBox(`go outside 3:05 - 4:03   (just for ${isToday ? 'today' : dayLabel(day)})`)}
+    ${timelineHtml(blocks, { day, live: isToday })}
+    ${blocks.length ? '' : `<div class="sched-empty muted">Nothing planned. Add something just for ${isToday ? 'today' : 'this day'} above, or make a schedule that repeats.</div>`}
   </div>`;
 }
 
@@ -1683,49 +1791,62 @@ function startBlockAt(grid, y) {
   const first = Number(grid.dataset.first);
   const min = Math.max(0, Math.min(23 * 60, Math.round(((y - grid.getBoundingClientRect().top) / HOUR_PX * 60 + first * 60) / 15) * 15));
   const box = $('#sched-input');
-  box.value = ` ${fmtTime(fromMin(min)).replace(/\s/g, '').toLowerCase()} - ${fmtTime(fromMin(Math.min(min + 60, 23 * 60 + 59))).replace(/\s/g, '').toLowerCase()}`;
+  const t = (m) => fmtTime(fromMin(m)).replace(/\s/g, '').toLowerCase();
+  box.value = ` ${t(min)} - ${t(Math.min(min + 60, 23 * 60 + 59))}`;
   updateSchedPreview();
   box.focus();
   box.setSelectionRange(0, 0);
   box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
-async function editBlock(day, id) {
-  const b = dayBlocks(day).find((x) => x.id === id);
+const blockFrom = (el) => {
+  const { block, day, tpl } = el.dataset;
+  const list = tpl ? scheduleById(tpl)?.blocks : dayEntry(day).extra;
+  return { b: list?.find((x) => x.id === block), day, tpl };
+};
+
+async function editBlock(el) {
+  const { b, day, tpl } = blockFrom(el);
   if (!b) return;
-  const text = await askText('Edit block', { value: `${b.title} ${fmtTime(b.start).replace(/\s/g, '').toLowerCase()} - ${fmtTime(b.end).replace(/\s/g, '').toLowerCase()}`, ok: 'Save' });
+  const t = (hm) => fmtTime(hm).replace(/\s/g, '').toLowerCase();
+  const text = await askText(tpl && day ? `Edit block (every ${daysText(scheduleById(tpl).days)})` : 'Edit block', { value: `${b.title} ${t(b.start)} - ${t(b.end)}`, ok: 'Save' });
   if (text == null || !text.trim()) return;
   const p = parseBlock(text);
   if (!p) return toast('Add a time range, like “go outside 3:05 - 4:03”');
-  saveDay(day, dayBlocks(day).map((x) => (x.id === id ? { ...x, ...p } : x)));
+  if (tpl) updateSchedule(tpl, (s) => ({ blocks: byStart(s.blocks.map((x) => (x.id === b.id ? { ...x, ...p } : x))) }));
+  else { const e = dayEntry(day); saveDayEntry(day, { extra: e.extra.map((x) => (x.id === b.id ? { ...x, ...p } : x)), done: e.done }); }
 }
 
 function openBlockMenu(el, x, y) {
-  const day = el.dataset.day;
-  const b = dayBlocks(day).find((n) => n.id === el.dataset.block);
+  const { b, day, tpl } = blockFrom(el);
   if (!b) return;
   closeDropdown();
   closeTaskMenu();
-  const next = ymd(addDays(parseDay(day), 1));
+  const s = tpl && scheduleById(tpl);
+  const e = day ? dayEntry(day) : null;
+  const done = e?.done.includes(b.id);
+  const next = day && ymd(addDays(parseDay(day), 1));
   const items = [
-    ['pencil', 'Edit', () => editBlock(day, b.id)],
-    ['check', b.done ? 'Mark not done' : 'Mark done', () => saveDay(day, dayBlocks(day).map((n) => (n.id === b.id ? { ...n, done: !n.done } : n)))],
-    ['timer', 'Focus timer', () => { startTimer(); }],
-    ['duplicate', 'Copy to tomorrow', () => {
-      state.schedule = { ...state.schedule, [next]: [...dayBlocks(next), { ...b, id: newBlockId(), done: false }] };
-      saveDay(next, dayBlocks(next));
+    ['pencil', s && day ? `Edit (every ${daysText(s.days)})` : 'Edit', () => editBlock(el)],
+    day && ['check', done ? 'Mark not done' : 'Mark done', () => saveDayEntry(day, { extra: e.extra, done: done ? e.done.filter((i) => i !== b.id) : [...e.done, b.id] })],
+    day && !tpl && ['duplicate', 'Copy to tomorrow', () => {
+      const n = dayEntry(next);
+      saveDayEntry(next, { extra: [...n.extra, { ...b, id: newBlockId() }], done: n.done });
       toast(`Copied to ${dayLabel(next)}`);
     }],
     '-',
-    ['trash', 'Delete', () => saveDay(day, dayBlocks(day).filter((n) => n.id !== b.id)), 'danger'],
-  ];
+    ['trash', s ? `Remove from ${s.name}` : 'Delete', () => {
+      if (s) updateSchedule(tpl, (o) => ({ blocks: o.blocks.filter((x) => x.id !== b.id) }));
+      else saveDayEntry(day, { extra: e.extra.filter((x) => x.id !== b.id), done: e.done.filter((i) => i !== b.id) });
+    }, 'danger'],
+  ].filter(Boolean);
   const menu = document.createElement('div');
   menu.className = 'dd-menu ctx-menu';
   menu.setAttribute('role', 'menu');
   menu.innerHTML = items.map((it) => menuItem(items, it)).join('');
-  menu.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const opt = e.target.closest('[data-i]');
+  menu.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const opt = ev.target.closest('[data-i]');
     if (!opt) return;
     closeTaskMenu();
     items[opt.dataset.i][2]();
@@ -1734,49 +1855,88 @@ function openBlockMenu(el, x, y) {
   el.classList.add('menu-on');
 }
 
+async function newSchedule() {
+  const name = await askText('New schedule', { placeholder: 'e.g. School days, Weekend', ok: 'Create' });
+  if (!name?.trim()) return;
+  // Starts on the days no other schedule has yet.
+  const free = WEEK.filter((d) => !schedules().some((s) => s.days.includes(d)));
+  const s = { id: newBlockId(), name: name.trim().slice(0, 60), days: free, blocks: [] };
+  await saveSchedules([...schedules(), s]);
+  setView({ type: 'schedule', id: `s:${s.id}` });
+}
+
+// A weekday belongs to one schedule at a time, so turning it on here takes it off the others.
+function toggleScheduleDay(id, d) {
+  const s = scheduleById(id);
+  const on = !s.days.includes(d);
+  saveSchedules(schedules().map((o) => {
+    if (o.id === id) return { ...o, days: on ? [...o.days, d] : o.days.filter((x) => x !== d) };
+    return on ? { ...o, days: o.days.filter((x) => x !== d) } : o;
+  }));
+}
+
+async function deleteSchedule(id) {
+  const s = scheduleById(id);
+  if (!s || !(await askConfirm(`Delete ${s.name}?`, { body: `Its ${s.blocks.length} block${s.blocks.length === 1 ? '' : 's'} stop showing on ${daysText(s.days).toLowerCase()}. One-off blocks you added to dates stay.`, ok: 'Delete', danger: true }))) return;
+  await saveSchedules(schedules().filter((o) => o.id !== id));
+  setView({ type: 'schedule' });
+}
+
 // Opening a day's schedule shows the current time (today) or the first block, not 8 AM.
+// After that, redraws keep wherever you scrolled it to.
 let schedScrolled = '';
+let schedScrollTop = 0;
+document.addEventListener('scroll', (e) => { if (e.target.classList?.contains('sched-scroll')) schedScrollTop = e.target.scrollTop; }, true);
 function scrollScheduleToNow() {
   const grid = $('.sched-grid');
   if (!grid) { schedScrolled = ''; return; }
-  if (schedScrolled === grid.dataset.day) return;
-  schedScrolled = grid.dataset.day;
+  const key = state.view.id || 'today';
+  if (schedScrolled === key) { grid.parentElement.scrollTop = schedScrollTop; return; }
+  schedScrolled = key;
   const target = $('.sched-now', grid) || $('.sblock', grid);
   if (!target) return;
-  const view = $('#view');
-  view.scrollTop = Math.max(0, target.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop - view.clientHeight / 3);
+  // The timeline scrolls in its own box, so the tabs and the right-now card stay in view.
+  const box = grid.parentElement;
+  box.scrollTop = Math.max(0, target.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - box.clientHeight / 3);
 }
 
-// On Today: what's on now, or what's next.
+// On Today: what's on now and how long it has left, or what's next.
 function scheduleBanner() {
-  const now = nowMin();
-  const blocks = dayBlocks(today()).filter((b) => !b.done);
-  const cur = blocks.find((b) => toMin(b.start) <= now && now < toMin(b.end));
-  if (cur) return `<div class="banner sched-banner now" data-nav="schedule">${ic('clock')} Now: <b>${esc(cur.title)}</b> · until ${esc(fmtTime(cur.end))} <span class="spacer"></span> Schedule →</div>`;
-  const next = blocks.find((b) => toMin(b.start) > now);
+  const { now, cur, next } = nowInfo();
+  if (cur) return `<div class="banner sched-banner now" data-nav="schedule">${ic('clock')} Now: <b>${esc(cur.title)}</b> · ${lengthText(toMin(cur.end) - now)} left, until ${esc(fmtTime(cur.end))} <span class="spacer"></span> Schedule →</div>`;
   if (next) return `<div class="banner sched-banner" data-nav="schedule">${ic('clock')} Next: <b>${esc(next.title)}</b> at ${esc(fmtTime(next.start))} · in ${lengthText(toMin(next.start) - now)} <span class="spacer"></span> Schedule →</div>`;
   return '';
 }
 
-// Keep the now line and the current block moving while the schedule is open.
+// Keep the countdown, the now line and the current block moving while the schedule is open.
 setInterval(() => {
-  const grid = $('.sched-grid');
-  if (!grid || grid.dataset.day !== today()) return;
+  const hero = $('#sched-hero');
+  if (hero) hero.outerHTML = heroHtml();
+  const grid = $('.sched-grid[data-live="1"]');
+  if (!grid) return;
   const first = Number(grid.dataset.first);
   const now = nowMin();
   const line = $('.sched-now', grid);
   if (line) line.style.top = `${((now - first * 60) / 60) * HOUR_PX}px`;
+  const blocks = dayBlocks(today());
   $$('.sblock', grid).forEach((el) => {
-    const b = dayBlocks(today()).find((x) => x.id === el.dataset.block);
+    const b = blocks.find((x) => x.id === el.dataset.block);
     if (!b || b.done) return;
     el.classList.toggle('past', now >= toMin(b.end));
     el.classList.toggle('now', now >= toMin(b.start) && now < toMin(b.end));
   });
-}, 30000);
+}, 20000);
 
 document.addEventListener('input', (e) => { if (e.target.id === 'sched-input') updateSchedPreview(); });
 document.addEventListener('keydown', (e) => {
   if (e.target.id === 'sched-input' && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addBlocks(); }
+  if (e.target.id === 'tpl-name' && e.key === 'Enter') e.target.blur();
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id !== 'tpl-name') return;
+  const { tpl } = schedTarget();
+  const name = e.target.value.trim().slice(0, 60);
+  if (tpl && name && name !== scheduleById(tpl)?.name) updateSchedule(tpl, () => ({ name }));
 });
 
 // ---------- focus view ----------
@@ -1975,14 +2135,19 @@ function renderView() {
         </div>`;
       }).join('')}</div>`;
   } else if (v.type === 'schedule') {
-    const day = /^\d{4}-\d{2}-\d{2}$/.test(v.id || '') ? v.id : t;
+    const target = schedTarget();
     title = 'Schedule';
-    sub = day === t ? `Today · ${parseDay(day).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}` : `${dayLabel(day)} · ${parseDay(day).toLocaleDateString([], { month: 'long', day: 'numeric' })}`;
-    actions = `<div class="seg sched-days">
-      <button data-act="sched-day" data-day="${ymd(addDays(parseDay(day), -1))}" title="Previous day">${ic('back')}</button>
-      <button data-act="sched-day" data-day="${t}" class="${day === t ? 'on' : ''}">Today</button>
-      <button data-act="sched-day" data-day="${ymd(addDays(parseDay(day), 1))}" title="Next day">${ic('arrow')}</button></div>`;
-    html = scheduleHtml(day);
+    actions = '';
+    if (target.tpl) sub = 'A schedule that repeats on the days you pick';
+    else {
+      const day = target.day;
+      sub = day === t ? `Today · ${parseDay(day).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}` : `${dayLabel(day)} · ${parseDay(day).toLocaleDateString([], { month: 'long', day: 'numeric' })}`;
+      actions = `<div class="seg sched-days">
+        <button data-act="sched-day" data-day="${ymd(addDays(parseDay(day), -1))}" title="Previous day">${ic('back')}</button>
+        <button data-act="sched-day" data-day="${t}" class="${day === t ? 'on' : ''}">Today</button>
+        <button data-act="sched-day" data-day="${ymd(addDays(parseDay(day), 1))}" title="Next day">${ic('arrow')}</button></div>`;
+    }
+    html = scheduleHtml(target);
   } else if (v.type === 'completed') {
     title = 'Completed';
     sub = 'Last 7 days';
@@ -3496,6 +3661,10 @@ document.addEventListener('click', (e) => {
     if (a === 'label-menu') { const r = act.getBoundingClientRect(); return openLabelMenu(act.dataset.name, r.left, r.bottom + 6, act); }
     if (a === 'sched-day') return setView({ type: 'schedule', id: act.dataset.day === t0() ? undefined : act.dataset.day });
     if (a === 'sched-add') return addBlocks();
+    if (a === 'sched-open') return setView({ type: 'schedule', id: act.dataset.id || undefined });
+    if (a === 'sched-new') return newSchedule();
+    if (a === 'tpl-day') return toggleScheduleDay(schedTarget().tpl, Number(act.dataset.d));
+    if (a === 'tpl-delete') return deleteSchedule(schedTarget().tpl);
     if (a === 'fc-toggle') return timer.running ? pauseTimer() : startTimer();
     if (a === 'fc-switch') return switchTimer();
     if (a === 'fc-reset') return resetTimer();
@@ -3513,7 +3682,7 @@ document.addEventListener('click', (e) => {
     }
   }
   const block = e.target.closest('.sblock[data-block]');
-  if (block) return editBlock(block.dataset.day, block.dataset.block);
+  if (block) return editBlock(block);
   const slot = e.target.closest('.sched-grid');
   if (slot) return startBlockAt(slot, e.clientY);
   const sketch = e.target.closest('[data-sketch]');

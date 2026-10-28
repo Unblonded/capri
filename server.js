@@ -485,33 +485,58 @@ app.post('/api/deadlines', requireToken, (req, res) => {
   res.json({ ok: true });
 });
 
-// ---- schedule (stored per user): day → time blocks like "go outside 15:05–16:03" ----
+// ---- schedule (stored per user) ----
+// Repeating schedules ("Weekdays": Mon–Fri, with time blocks) plus, per date, one-off blocks and which
+// blocks were ticked off that day. Older files were just { date: blocks }; those become one-off blocks.
 
 const scheduleFile = (req) => path.join(userDir(req), 'schedule.json');
 function readSchedule(req) {
-  try { return JSON.parse(fs.readFileSync(scheduleFile(req), 'utf8')); } catch { return {}; }
+  let raw = {};
+  try { raw = JSON.parse(fs.readFileSync(scheduleFile(req), 'utf8')); } catch { /* none yet */ }
+  if (Array.isArray(raw.schedules)) return { schedules: raw.schedules, days: raw.days || {} };
+  return { schedules: [], days: Object.fromEntries(Object.entries(raw).map(([d, blocks]) => [d, { extra: blocks, done: blocks.filter((b) => b.done).map((b) => b.id) }])) };
+}
+function writeSchedule(req, data) {
+  fs.mkdirSync(userDir(req), { recursive: true });
+  fs.writeFileSync(scheduleFile(req), JSON.stringify(data, null, 2));
+}
+
+const hhmm = (t) => typeof t === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
+const okId = (id) => typeof id === 'string' && /^[\w-]{1,40}$/.test(id);
+function cleanBlocks(blocks) {
+  if (!Array.isArray(blocks) || blocks.length > 100) return null;
+  const out = [];
+  for (const b of blocks) {
+    if (!b || typeof b.title !== 'string' || !b.title.trim() || !hhmm(b.start) || !hhmm(b.end) || !okId(b.id)) return null;
+    out.push({ id: b.id, title: b.title.trim().slice(0, 200), start: b.start, end: b.end });
+  }
+  return out;
 }
 
 app.get('/api/schedule', requireToken, (req, res) => res.json(readSchedule(req)));
 
-// { day: 'YYYY-MM-DD', blocks: [{ id, title, start: 'HH:MM', end: 'HH:MM', done? }] } replaces that day's blocks.
+// { schedules: [{ id, name, days: [0–6], blocks }] } replaces the repeating schedules;
+// { day: 'YYYY-MM-DD', extra: blocks, done: [ids] } replaces that date's one-off blocks and ticks.
 app.post('/api/schedule', requireToken, (req, res) => {
-  const { day, blocks } = req.body || {};
-  const hhmm = (t) => typeof t === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day || '')) return res.status(400).json({ error: 'Bad day' });
-  if (!Array.isArray(blocks) || blocks.length > 100) return res.status(400).json({ error: 'Expected up to 100 blocks' });
-  const clean = [];
-  for (const b of blocks) {
-    if (!b || typeof b.title !== 'string' || !b.title.trim() || !hhmm(b.start) || !hhmm(b.end) || !/^[\w-]{1,40}$/.test(b.id || '')) {
-      return res.status(400).json({ error: 'Bad block' });
+  const data = readSchedule(req);
+  const { schedules, day, extra, done } = req.body || {};
+  if (schedules !== undefined) {
+    if (!Array.isArray(schedules) || schedules.length > 20) return res.status(400).json({ error: 'Expected up to 20 schedules' });
+    const clean = [];
+    for (const s of schedules) {
+      const blocks = cleanBlocks(s?.blocks);
+      if (!blocks || !okId(s.id) || typeof s.name !== 'string' || !Array.isArray(s.days)) return res.status(400).json({ error: 'Bad schedule' });
+      clean.push({ id: s.id, name: s.name.trim().slice(0, 60) || 'Schedule', days: [...new Set(s.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))], blocks });
     }
-    clean.push({ id: b.id, title: b.title.trim().slice(0, 200), start: b.start, end: b.end, ...(b.done ? { done: true } : {}) });
+    data.schedules = clean;
+  } else {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day || '')) return res.status(400).json({ error: 'Bad day' });
+    const blocks = cleanBlocks(extra || []);
+    if (!blocks || !Array.isArray(done || []) || (done || []).length > 200 || !(done || []).every(okId)) return res.status(400).json({ error: 'Bad blocks' });
+    if (blocks.length || (done || []).length) data.days[day] = { extra: blocks, done: done || [] };
+    else delete data.days[day];
   }
-  const all = readSchedule(req);
-  if (clean.length) all[day] = clean;
-  else delete all[day];
-  fs.mkdirSync(userDir(req), { recursive: true });
-  fs.writeFileSync(scheduleFile(req), JSON.stringify(all, null, 2));
+  writeSchedule(req, data);
   res.json({ ok: true });
 });
 
