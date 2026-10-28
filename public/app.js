@@ -3304,5 +3304,13 @@ window.addEventListener('pageshow', () => autoSync(1000));
 window.addEventListener('online', () => autoSync(0));
 
 $$('[data-ic]').forEach((el) => { el.outerHTML = ic(el.dataset.ic); });
+// Shortcut hints are written Mac-style (⌘, ⇧); everywhere else they read Ctrl and Shift.
+const isMac = /mac|iphone|ipad|ipod/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent);
+const modText = (text) => (isMac ? text : text
+  .replace(/⇧⌘(\w)/g, 'Ctrl+Shift+$1').replace(/⌘(\w)/g, 'Ctrl+$1').replace(/⌘/g, 'Ctrl').replace(/⇧/g, 'Shift'));
+if (!isMac) {
+  $$('kbd').forEach((el) => { el.textContent = modText(el.textContent); });
+  $$('[title]').forEach((el) => { el.title = modText(el.title); });
+}
 renderTimer();
 boot().catch((err) => { console.error(err); showConnect(); });
