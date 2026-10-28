@@ -339,7 +339,7 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .board { display: flex; gap: 14px; align-items: flex-start; width: max-content; min-width: 100%; padding: 0 20px 20px 0; }
 .column { box-shadow: 0 6px 18px var(--glass-shade), inset 0 1px 0 var(--glass-edge); }
 .column { width: 290px; flex-shrink: 0; padding: 10px; display: flex; flex-direction: column; transition: outline-color .15s, background-color .15s; outline: 2px dashed transparent; outline-offset: -2px; }
-.column .group-head { position: static; border: 0; background: none; backdrop-filter: none; padding: 4px 6px 10px; }
+.column .group-head, :root[data-theme] .board .column .group-head { position: static; border: 0; background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 0; padding: 12px 10px 10px; }
 .column .group-head.today { color: var(--accent); }
 .column .group-head.p1 { color: var(--p1); }
 .column .group-head.p2 { color: var(--p2); }
