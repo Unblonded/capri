@@ -30,7 +30,11 @@
   <div id="connect" class="connect hidden">
     <div class="connect-card glass">
       <div class="brand big"><span class="logo"><i data-ic="capri"></i></span><span class="wordmark">Capri</span></div>
-      <p class="muted">Steady climb, one task at a time. Connect your Todoist to begin.</p>
+      <p class="muted" id="connect-lead">Steady climb, one task at a time. Connect your Todoist to begin.</p>
+      <div id="connect-expired" class="expired-note hidden">
+        <b>Your token has expired</b>
+        <span>Todoist no longer accepts the token this device signed in with, usually because it was changed or regenerated. Enter your new token below. Your notes, schedule and settings come with you.</span>
+      </div>
       <a id="oauth-btn" class="btn primary wide hidden" href="/auth/login">Sign in with Todoist</a>
       <div id="oauth-or" class="divider hidden"><span>or paste your API token</span></div>
       <form id="token-form">

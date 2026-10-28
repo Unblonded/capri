@@ -117,7 +117,7 @@ async function api(method, url, body) {
   }
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && url !== '/api/connect') {
-    showConnect();
+    showConnect({ expired: data.expired });
     throw new Error(data.error || 'Not connected');
   }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
@@ -3213,9 +3213,13 @@ function moveSelection(delta) {
 
 // ---------- connect screen ----------
 
-function showConnect() {
+function showConnect({ expired = false } = {}) {
   $('#app').classList.add('hidden');
   $('#connect').classList.remove('hidden');
+  $('#connect-expired').classList.toggle('hidden', !expired);
+  $('#connect-lead').classList.toggle('hidden', expired);
+  $('#token-input').placeholder = expired ? 'Your new Todoist API token' : 'Todoist API token';
+  if (expired) $('#token-input').focus();
 }
 
 // Offline cache: the app opens from this device's copy and refreshes it in the background.
@@ -3271,9 +3275,11 @@ $('#token-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('#connect-error').textContent = '';
   try {
-    await api('POST', '/api/connect', { token: $('#token-input').value });
+    const { carried } = await api('POST', '/api/connect', { token: $('#token-input').value });
     $('#token-input').value = '';
-    boot();
+    lastSyncFingerprint = '';
+    await boot();
+    if (carried) toast('Signed in with your new token. Your notes, schedule and settings came across.');
   } catch (err) { $('#connect-error').textContent = err.message; }
 });
 

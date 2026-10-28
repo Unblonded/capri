@@ -1273,3 +1273,8 @@ img, svg { -webkit-user-drag: none; }
   .tap-release, .busy, .task.resched-out, .task.resched-in { animation: none; }
   .tap-press { scale: 1; }
 }
+
+/* Connect screen: the token this device used has stopped working. */
+.expired-note { display: grid; gap: 4px; text-align: left; margin: 4px 0 14px; padding: 12px 14px; border-radius: 14px; font-size: 13px; line-height: 1.45;
+  background: color-mix(in srgb, var(--deadline) 12%, transparent); border: 1px solid color-mix(in srgb, var(--deadline) 32%, transparent); color: var(--text); }
+.expired-note b { color: var(--deadline); font-size: 14px; }

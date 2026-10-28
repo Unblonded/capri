@@ -20,7 +20,7 @@ There are no Capri accounts or passwords: **your Todoist token is your login.**
 
 - Each browser or desktop app keeps its own token in an `HttpOnly` cookie (marked `Secure` over HTTPS), valid for a year. *Sign out* in the sidebar clears it.
 - The server never stores tokens. It reads the cookie on each request and uses it to call the Todoist API v1 on that person's behalf, so several people can share one Capri server and each only sees their own Todoist.
-- Capri's own data (notes and sketches, your schedule, deadlines, the order of board columns) is stored per person under `data/users/<hash of token>/`. The folder name is a one-way SHA-256 hash, so the token can't be recovered from it. That data follows your token, so if you regenerate your Todoist token you start fresh.
+- Capri's own data (notes and sketches, your schedule, deadlines, the order of board columns) is stored per person under `data/users/<hash of token>/`. The folder name is a one-way SHA-256 hash, so the token can't be recovered from it. That data follows your token. If your token stops working (you regenerated it, or it expired), Capri says so and asks for the new one; entering it on a device that used the old one brings your notes, schedule and settings across, as long as both tokens belong to the same Todoist account.
 
 ## Hosting it on a domain (e.g. https://capri.kalculator.lol)
 

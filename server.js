@@ -126,8 +126,8 @@ const wrap = (fn) => (req, res) =>
   fn(req, res).catch((err) => {
     const status = err.status || 500;
     if (status === 401 || status === 403) {
-      clearTokenCookie(res);
-      res.status(401).json({ error: 'Todoist rejected the token. Reconnect your account.' });
+      // The cookie stays: entering a new token on this device can then bring this token's Capri data along.
+      res.status(401).json({ error: 'Your Todoist token has expired or was changed.', expired: true });
       return;
     }
     console.error(err);
@@ -146,19 +146,65 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-app.post('/api/connect', wrap(async (req, res) => {
+// Which Todoist account a token belongs to, or null if Todoist won't say. Throws if the token is rejected.
+async function accountOf(token) {
+  try {
+    const user = await td('GET', '/user', { auth: token });
+    return user?.id != null ? String(user.id) : null;
+  } catch (err) {
+    if (err.status === 401 || err.status === 403) throw err;
+    await td('GET', '/projects', { query: { limit: 1 }, auth: token }); // still check the token works
+    return null;
+  }
+}
+
+// Each data folder notes which Todoist account it belongs to, so a replacement token can claim it.
+const metaFile = (dir) => path.join(dir, 'meta.json');
+const accountOfDir = (dir) => { try { return JSON.parse(fs.readFileSync(metaFile(dir), 'utf8')).account || null; } catch { return null; } };
+function rememberAccount(userId, account) {
+  if (!account) return;
+  const dir = path.join(DATA_DIR, 'users', userId);
+  if (accountOfDir(dir) === account) return;
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(metaFile(dir), JSON.stringify({ account }, null, 2));
+}
+
+// Signing in with a new token on a device that still has the old one (it expired, or you regenerated it):
+// if both belong to the same Todoist account, the old token's notes, schedule and settings move across.
+function carryOver(oldToken, newToken, account) {
+  if (!oldToken || !account || oldToken === newToken) return false;
+  const from = path.join(DATA_DIR, 'users', userIdFor(oldToken));
+  const to = path.join(DATA_DIR, 'users', userIdFor(newToken));
+  if (!fs.existsSync(from) || accountOfDir(from) !== account) return false;
+  if (fs.existsSync(to) && fs.readdirSync(to).some((f) => f !== 'meta.json')) return false; // never overwrite
+  fs.rmSync(to, { recursive: true, force: true });
+  fs.renameSync(from, to);
+  return true;
+}
+
+async function signIn(req, res, token) {
+  const account = await accountOf(token);
+  const carried = carryOver(req.token, token, account);
+  setTokenCookie(req, res, token);
+  req.token = token;
+  req.userId = userIdFor(token);
+  rememberAccount(req.userId, account);
+  adoptLegacyDrawings(req);
+  return { carried };
+}
+
+app.post('/api/connect', async (req, res) => {
   const candidate = String(req.body?.token || '').trim();
   if (!candidate) return res.status(400).json({ error: 'Token is required' });
   try {
-    await td('GET', '/projects', { query: { limit: 1 }, auth: candidate });
+    const { carried } = await signIn(req, res, candidate);
+    res.json({ connected: true, carried });
   } catch (err) {
-    return res.status(400).json({ error: 'That token did not work with Todoist.' });
+    if (err.status === 401 || err.status === 403) return res.status(400).json({ error: 'That token did not work with Todoist.' });
+    console.error(err);
+    res.status(502).json({ error: 'Couldn’t reach Todoist. Try again in a moment.' });
   }
-  setTokenCookie(req, res, candidate);
-  req.userId = userIdFor(candidate);
-  adoptLegacyDrawings(req);
-  res.json({ connected: true });
-}));
+});
 
 app.post('/api/disconnect', (req, res) => {
   clearTokenCookie(res);
@@ -194,9 +240,7 @@ app.get('/auth/callback', wrap(async (req, res) => {
   });
   const data = await r.json();
   if (!r.ok || !data.access_token) return res.status(400).send('Todoist did not return a token.');
-  setTokenCookie(req, res, data.access_token);
-  req.userId = userIdFor(data.access_token);
-  adoptLegacyDrawings(req);
+  await signIn(req, res, data.access_token);
   res.redirect('/');
 }));
 
@@ -211,8 +255,14 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+// Folders made before accounts were noted get their note the first time they load.
+const noted = new Set();
 app.get('/api/bootstrap', requireToken, wrap(async (req, res) => {
   const key = userIdFor(req.token);
+  if (!noted.has(key)) {
+    noted.add(key);
+    if (!accountOfDir(userDir(req))) accountOf(req.token).then((a) => rememberAccount(key, a)).catch(() => noted.delete(key));
+  }
   let hit = bootstrapShared.get(key);
   if (!hit || Date.now() - hit.at > BOOTSTRAP_SHARE_MS) {
     const data = Promise.all([
