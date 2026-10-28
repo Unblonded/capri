@@ -2609,7 +2609,10 @@ function openDraw({ drawing = null, taskId = null }) {
   pad2d.strokes = [];
   pad2d.redo = [];
   pad2d.base = null;
+  pad2d.baseShown = null;
   pad2d.dirty = false;
+  pad2d.k = sketchInvert();
+  $('#draw-canvas').style.background = inkFor(PAPER, pad2d.k);
   const task = taskId || drawing?.task_id || null;
   const linked = task && taskById(task);
   $('#draw-title').value = drawing?.title || (linked ? `Sketch: ${plain(linked.content)}`.slice(0, 80) : '');
@@ -2620,7 +2623,12 @@ function openDraw({ drawing = null, taskId = null }) {
     sizeCanvas();
     if (drawing) {
       const img = new Image();
-      img.onload = () => { pad2d.base = img; rebuildCache(); paint(); };
+      img.onload = () => {
+        pad2d.base = img;
+        pad2d.baseShown = pad2d.k ? invertedImage(img, pad2d.k) : img;
+        rebuildCache();
+        paint();
+      };
       img.src = `/api/drawings/${drawing.id}.png?v=${encodeURIComponent(drawing.updated_at)}`;
     }
   });
@@ -2645,15 +2653,43 @@ function sizeCanvas() {
   paint();
 }
 
-function drawStroke(ctx, s) {
+// Sketches are saved on light paper. Dark themes show them inverted with the same hues (the CSS
+// invert(k) hue-rotate(180deg) that the thumbnails use); the pad draws that itself, because Safari
+// won't apply a CSS filter to a canvas.
+const sketchInvert = () => Number(getComputedStyle(document.documentElement).getPropertyValue('--sketch-invert')) || 0;
+function shade(r, g, b, k) {
+  [r, g, b] = [r, g, b].map((c) => k + (c / 255) * (1 - 2 * k));
+  const m = [[-0.574, 1.43, 0.144], [0.426, 0.43, 0.144], [0.426, 1.43, -0.856]];
+  return m.map(([x, y, z]) => Math.round(Math.min(1, Math.max(0, x * r + y * g + z * b)) * 255));
+}
+function inkFor(hex, k) {
+  if (!k) return hex;
+  const n = parseInt(hex.slice(1), 16);
+  return `rgb(${shade(n >> 16, (n >> 8) & 255, n & 255, k).join(',')})`;
+}
+function invertedImage(img, k) {
+  const c = document.createElement('canvas');
+  c.width = img.width;
+  c.height = img.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, c.width, c.height);
+  const px = data.data;
+  for (let i = 0; i < px.length; i += 4) [px[i], px[i + 1], px[i + 2]] = shade(px[i], px[i + 1], px[i + 2], k);
+  ctx.putImageData(data, 0, 0);
+  return c;
+}
+
+function drawStroke(ctx, s, k = 0) {
   const dpr = window.devicePixelRatio || 1;
   const pts = s.points;
   if (!pts.length) return;
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = s.color;
-  ctx.globalCompositeOperation = s.tool === 'eraser' ? 'destination-out' : s.tool === 'marker' ? 'multiply' : 'source-over';
+  ctx.strokeStyle = inkFor(s.color, k);
+  // A highlighter darkens light paper; on dark paper it has to lighten instead.
+  ctx.globalCompositeOperation = s.tool === 'eraser' ? 'destination-out' : s.tool === 'marker' ? (k ? 'screen' : 'multiply') : 'source-over';
   ctx.globalAlpha = s.tool === 'marker' ? 0.35 : 1;
   const avgP = pts.reduce((a, p) => a + p[2], 0) / pts.length;
   ctx.lineWidth = (s.tool === 'marker' ? s.size * 3 : s.tool === 'eraser' ? s.size * 3 : s.size * (0.6 + avgP * 0.8)) * dpr;
@@ -2671,16 +2707,20 @@ function drawStroke(ctx, s) {
   ctx.restore();
 }
 
-function rebuildCache() {
-  const c = pad2d.cache;
-  if (!c) return;
+// The base image and every stroke, on a transparent layer; k > 0 draws them the way the theme shows them.
+function drawLayer(c, k) {
   const ctx = c.getContext('2d');
   ctx.clearRect(0, 0, c.width, c.height);
-  if (pad2d.base) {
-    const scale = Math.min(c.width / pad2d.base.width, c.height / pad2d.base.height);
-    ctx.drawImage(pad2d.base, 0, 0, pad2d.base.width * scale, pad2d.base.height * scale);
+  const base = k ? pad2d.baseShown : pad2d.base;
+  if (base) {
+    const scale = Math.min(c.width / base.width, c.height / base.height);
+    ctx.drawImage(base, 0, 0, base.width * scale, base.height * scale);
   }
-  pad2d.strokes.forEach((s) => drawStroke(ctx, s));
+  pad2d.strokes.forEach((s) => drawStroke(ctx, s, k));
+}
+
+function rebuildCache() {
+  if (pad2d.cache) drawLayer(pad2d.cache, pad2d.k);
 }
 
 function paint() {
@@ -2688,7 +2728,7 @@ function paint() {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (pad2d.cache) ctx.drawImage(pad2d.cache, 0, 0);
-  if (pad2d.current) drawStroke(ctx, pad2d.current);
+  if (pad2d.current) drawStroke(ctx, pad2d.current, pad2d.k);
 }
 
 function drawUndo() { if (pad2d.strokes.length) { pad2d.redo.push(pad2d.strokes.pop()); rebuildCache(); paint(); } }
@@ -2706,7 +2746,12 @@ async function saveDrawing() {
   const ctx = out.getContext('2d');
   ctx.fillStyle = PAPER;
   ctx.fillRect(0, 0, out.width, out.height);
-  ctx.drawImage(pad2d.cache, 0, 0);
+  // Always saved as drawn on light paper, whatever the theme shows.
+  const layer = document.createElement('canvas');
+  layer.width = out.width;
+  layer.height = out.height;
+  drawLayer(layer, 0);
+  ctx.drawImage(layer, 0, 0);
   const btn = $('#draw-save');
   btn.disabled = true;
   try {
