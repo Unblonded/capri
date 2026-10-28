@@ -924,6 +924,9 @@ select[data-dd] { display: none !important; } /* .btn styles would otherwise ove
 :root[data-theme="capri"] .glass::before { background-size: 300% 300%; animation: capri-edge 9s ease-in-out infinite alternate; }
 @keyframes capri-edge { from { background-position: 0% 0%; } to { background-position: 100% 100%; } }
 :root[data-theme="capri"] .brand .logo .ic { animation: capri-flicker 5s steps(1) infinite; }
+/* At rest (window hidden, or another app in front): the ambient motion holds still instead of running the GPU. */
+:root.at-rest :is(.blob, .aurora, .wordmark, .brand .logo .ic),
+:root.at-rest :is(.backdrop, .glass)::before, :root.at-rest .backdrop::after { animation-play-state: paused !important; }
 @keyframes capri-flicker { 0%, 87%, 91%, 100% { opacity: 1; } 88% { opacity: .35; } 89.5% { opacity: .85; } 90% { opacity: .5; } }
 
 /* ---- glass panels: neon edge (red into violet) and HUD corner ticks ---- */

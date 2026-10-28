@@ -89,7 +89,8 @@ function createWindow() {
     ...(IS_MAC
       ? { trafficLightPosition: { x: 14, y: 11 } }
       : { titleBarOverlay: { color: '#00000000', symbolColor: '#8a8fa8', height: 34 } }),
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
+    // Hidden or minimised, Chromium idles the page; only the pinned widget keeps painting (see setPinned).
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: !config.pinned },
   });
   win.setMenuBarVisibility(false);
 
@@ -191,6 +192,7 @@ function setPinned(on) {
     on = false;
   }
   if (!on) desktopPin.unpin(win);
+  win.webContents.setBackgroundThrottling(!on);
   win.setSkipTaskbar(on);
   win.setMinimizable(!on); // a desktop widget has nothing to minimise to
   if (on) win.setAlwaysOnTop(false);

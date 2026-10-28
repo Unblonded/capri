@@ -4334,6 +4334,12 @@ async function autoSync(minGap) {
 setInterval(() => autoSync(), 2000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) autoSync(1000); });
 window.addEventListener('focus', () => autoSync(1000));
+
+// The backdrop's endless animations pause while the window is hidden or another app is in front.
+const markRest = () => document.documentElement.classList.toggle('at-rest', document.hidden || !document.hasFocus());
+for (const ev of ['focus', 'blur']) window.addEventListener(ev, markRest);
+document.addEventListener('visibilitychange', markRest);
+markRest();
 window.addEventListener('pageshow', () => autoSync(1000));
 window.addEventListener('online', () => autoSync(0));
 
