@@ -187,8 +187,16 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 /* ---------- layout ---------- */
 .app { position: relative; z-index: 1; display: flex; gap: 14px; height: 100vh; padding: 14px; overflow: hidden; }
 .sidebar {
-  width: 272px; flex-shrink: 0; padding: 16px 12px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto;
+  width: 272px; flex-shrink: 0; padding: 16px 12px; display: flex; flex-direction: column; gap: 3px; overflow: hidden;
 }
+/* The views, projects and labels scroll between the fixed header and the timer; the list fades at its edges. */
+.sidebar-scroll {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; position: relative;
+  display: flex; flex-direction: column; gap: 3px; margin: 0 -12px; padding: 4px 12px 12px; scrollbar-width: none;
+  mask-image: linear-gradient(transparent, #000 6px, #000 calc(100% - 14px), transparent);
+}
+.sidebar-scroll::-webkit-scrollbar { display: none; }
+.sidebar-scroll > :not(.nav-pill) { position: relative; z-index: 1; }
 .sidebar-head { display: flex; justify-content: space-between; align-items: center; padding: 0 6px 10px; }
 .brand { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 9px; letter-spacing: -0.01em; }
 .brand.big { font-size: 26px; justify-content: center; margin-bottom: 6px; }
@@ -230,10 +238,10 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .nav-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-item .count { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .nav-item .count.alert { color: #fff; background: var(--p1); padding: 0 7px; border-radius: 999px; font-weight: 600; }
-.sidebar-foot { padding-top: 10px; display: flex; justify-content: space-between; }
+.sidebar-foot { flex-shrink: 0; padding-top: 10px; display: flex; justify-content: space-between; }
 
 /* focus timer */
-.timer { margin-top: auto; padding: 12px 14px; display: grid; gap: 6px; }
+.timer { margin-top: 8px; flex-shrink: 0; padding: 12px 14px; display: grid; gap: 6px; }
 .timer-top { display: flex; justify-content: space-between; align-items: baseline; }
 .timer-mode { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .timer.running .timer-mode { color: var(--accent); }
@@ -546,7 +554,6 @@ body.col-sorting, body.col-sorting * { cursor: grabbing !important; user-select:
   .app { padding: 8px; gap: 8px; }
   .sidebar { position: fixed; inset: 8px auto 8px 8px; z-index: 45; transform: translateX(-110%); transition: transform .25s; background: var(--glass-strong); }
   .sidebar.open { transform: none; }
-  .sidebar { overscroll-behavior: contain; }
   .menu-btn { display: grid; }
   .main-head { padding: 14px 16px 8px; flex-wrap: wrap; }
   /* Keep room for the title; buttons that don't fit drop to their own line. */

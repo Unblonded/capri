@@ -1060,11 +1060,12 @@ function render() {
 let navPillAt = null;
 function moveNavPill() {
   const sidebar = $('#sidebar');
-  let pill = $('.nav-pill', sidebar);
+  const list = $('#sidebar-scroll'); // the pill lives in the scrolling list so it scrolls with the items
+  let pill = $('.nav-pill', list);
   if (!pill) {
     pill = document.createElement('span');
     pill.className = 'nav-pill';
-    sidebar.prepend(pill);
+    list.prepend(pill);
   }
   const item = $('.nav-item.active', sidebar);
   const r = item?.getBoundingClientRect();
@@ -1075,9 +1076,9 @@ function moveNavPill() {
     navPillAt = null;
     return;
   }
-  const sr = sidebar.getBoundingClientRect();
-  const top = Math.round(r.top - sr.top + sidebar.scrollTop - sidebar.clientTop);
-  const left = Math.round(r.left - sr.left - sidebar.clientLeft);
+  const sr = list.getBoundingClientRect();
+  const top = Math.round(r.top - sr.top + list.scrollTop);
+  const left = Math.round(r.left - sr.left);
   // Background re-renders land on the same spot; only a real move animates.
   if (navPillAt && navPillAt.top === top && navPillAt.left === left && navPillAt.w === r.width && navPillAt.h === r.height) return;
   const first = navPillAt === null;
@@ -3361,14 +3362,15 @@ const endNavSwipe = () => {
   side.style.transform = '';
   scrim.style.opacity = scrim.style.visibility = '';
 };
-// iOS hands a scroll the sidebar can't take (list too short, or already at the top or bottom) to the page
-// behind it, which drags the whole app around. Keep vertical drags inside the open sidebar.
+// Only the list in the middle of the sidebar scrolls. iOS hands a scroll it can't take (list too short, or
+// already at the top or bottom) to the page behind it, which drags the whole app around; stop it there instead.
 let navScrollY = null;
 let navScrollX = 0;
 $('#sidebar').addEventListener('touchstart', (e) => { navScrollY = e.touches[0].clientY; navScrollX = e.touches[0].clientX; }, { passive: true });
 $('#sidebar').addEventListener('touchmove', (e) => {
   if (navScrollY == null || e.touches.length > 1) return;
-  const side = e.currentTarget;
+  const side = e.target.closest('#sidebar-scroll');
+  if (!side) { e.preventDefault(); return; } // the header, timer and footer don't scroll at all
   const dy = e.touches[0].clientY - navScrollY;
   if (Math.abs(e.touches[0].clientX - navScrollX) > Math.abs(dy)) return; // a sideways swipe closes it instead
   const atTop = side.scrollTop <= 0;
