@@ -740,7 +740,7 @@ function closeTaskMenu() {
     state.selectedId = state.detailId;
     $$(`[data-task="${state.detailId}"]`).forEach((el) => el.classList.add('selected'));
   }
-  $$('.group-head.menu-on').forEach((el) => el.classList.remove('menu-on'));
+  $$('.menu-on').forEach((el) => el.classList.remove('menu-on'));
 }
 
 // Shared by the task and section menus: places the menu at the pointer, kept on screen.
@@ -781,6 +781,7 @@ function openTaskMenu(id, x, y) {
     t.due && ['close', 'Remove date', () => setDue(id, 'no date')],
     ['flag', 'Set deadline…', () => openDetail(id, '#d-deadline')],
     'priority',
+    ['comment', 'Note', () => openNote({ taskId: id })],
     ['pencil', 'Sketch', () => openDraw({ taskId: id })],
     ['timer', 'Focus timer', () => startTimer(id)],
     '-',
@@ -881,6 +882,8 @@ function openColumnMenu(head, x, y) {
 }
 
 document.addEventListener('contextmenu', (e) => {
+  const note = e.target.closest('.sketch[data-sketch], .thumb[data-sketch]');
+  if (note) { e.preventDefault(); return openNoteMenu(note, e.clientX, e.clientY); }
   const head = e.target.closest('.group-head[data-move], .group-head[data-section]');
   if (head && !e.target.closest('.task')) {
     e.preventDefault();
@@ -1124,7 +1127,7 @@ function renderSidebar() {
     navItem({ type: 'deadlines', ico: 'flag', name: 'Deadlines', count: dlSoon.length, alert: dlOverdue }),
     navItem({ type: 'focus', ico: 'star', name: 'Focus (P1 & P2)', count: focus }),
     navItem({ type: 'board', ico: 'board', name: 'Board' }),
-    navItem({ type: 'sketches', ico: 'pencil', name: 'Sketches', count: state.drawings.length }),
+    navItem({ type: 'sketches', ico: 'pencil', name: 'Notes', count: state.drawings.length }),
     navItem({ type: 'completed', ico: 'done', name: 'Completed' }),
   ].filter(Boolean).join('');
 
@@ -1525,16 +1528,21 @@ function renderView() {
     sub = `${items.length} result${items.length === 1 ? '' : 's'}`;
     html = items.length ? group('', taskTree(items)) : empty('search', 'Nothing matched.');
   } else if (v.type === 'sketches') {
-    title = 'Sketches';
-    sub = 'Drawings saved on this computer';
-    actions = `<button class="btn primary sm" data-act="new-sketch">${ic('pencil')} New sketch</button>`;
+    title = 'Notes';
+    sub = 'Written notes and sketches, saved to your account';
+    actions = `<button class="btn primary sm" data-act="new-note">${ic('plus')} New note</button>
+      <button class="btn sm" data-act="new-sketch">${ic('pencil')} New sketch</button>`;
     viewEl.classList.add('wide');
     html = `<div class="sketch-grid">
-      <button class="sketch new" data-act="new-sketch">${ic('plus')} New sketch</button>
+      <div class="new-pair">
+        <button class="sketch new" data-act="new-note">${ic('plus')} New note</button>
+        <button class="sketch new" data-act="new-sketch">${ic('pencil')} New sketch</button>
+      </div>
       ${state.drawings.map((d) => {
         const task = d.task_id && taskById(d.task_id);
         return `<div class="sketch glass" data-sketch="${d.id}">
-          <img src="/api/drawings/${d.id}.png?v=${encodeURIComponent(d.updated_at)}" alt="" loading="lazy" />
+          ${isWritten(d) ? `<div class="note-paper">${esc((d.body || '').slice(0, 600))}</div>`
+            : `<img src="/api/drawings/${d.id}.png?v=${encodeURIComponent(d.updated_at)}" alt="" loading="lazy" />`}
           <div class="s-title">${esc(d.title)}</div>
           <div class="s-sub">${task ? '↳ ' + esc(plain(task.content)) : new Date(d.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</div>
         </div>`;
@@ -1725,10 +1733,13 @@ function renderDetail() {
     <div class="subtask-list">${kids.map((k) => taskRow(k, { showProject: false })).join('')}
       ${inlineAdd({ parent_id: t.id, project_id: t.project_id })}</div>
 
-    <div class="section-title">Sketches</div>
+    <div class="section-title">Notes</div>
     <div class="thumbs">
-      ${drawingsFor(t.id).map((d) => `<button class="thumb" data-sketch="${d.id}" title="${esc(d.title)}"><img src="/api/drawings/${d.id}.png?v=${encodeURIComponent(d.updated_at)}" alt="" /></button>`).join('')}
-      <button class="thumb add" data-act="h-sketch" title="New sketch for this task">${ic('plus')}</button>
+      ${drawingsFor(t.id).map((d) => isWritten(d)
+        ? `<button class="thumb text" data-sketch="${d.id}" title="${esc(d.title)}">${ic('comment')}</button>`
+        : `<button class="thumb" data-sketch="${d.id}" title="${esc(d.title)}"><img src="/api/drawings/${d.id}.png?v=${encodeURIComponent(d.updated_at)}" alt="" /></button>`).join('')}
+      <button class="thumb add" data-act="h-note" title="New note for this task">${ic('plus')}</button>
+      <button class="thumb add" data-act="h-sketch" title="New sketch for this task">${ic('pencil')}</button>
     </div>
 
     <div class="section-title">Comments</div>
@@ -2139,6 +2150,7 @@ function renderPalette() {
   const match = (s) => !q || s.toLowerCase().includes(q);
   const commands = [
     { label: 'Add task', run: () => openQuick() },
+    { label: 'New note', run: () => openNote({}) },
     { label: 'New sketch', run: () => openDraw({}) },
     { label: 'Start focus timer', run: () => startTimer() },
     { label: 'Go to Dashboard', run: () => setView({ type: 'dashboard' }) },
@@ -2147,7 +2159,7 @@ function renderPalette() {
     { label: 'Go to Upcoming', run: () => setView({ type: 'upcoming' }) },
     { label: 'Go to Deadlines', run: () => setView({ type: 'deadlines' }) },
     { label: 'Go to Focus', run: () => setView({ type: 'focus' }) },
-    { label: 'Go to Sketches', run: () => setView({ type: 'sketches' }) },
+    { label: 'Go to Notes', run: () => setView({ type: 'sketches' }) },
     { label: 'Go to Completed', run: () => setView({ type: 'completed' }) },
     { label: 'Theme: Light', run: () => switchTheme('light') },
     { label: 'Theme: Dark', run: () => switchTheme('dark') },
@@ -2166,8 +2178,8 @@ function renderPalette() {
   const tasks = q ? openTasks().filter((t) => match(t.content) || match(t.description || '')).slice(0, 12).map((t) => ({
     label: t.content, kind: 'Task', group: 'Tasks', run: () => openDetail(t.id),
   })) : [];
-  const sketches = q ? state.drawings.filter((d) => match(d.title)).slice(0, 6).map((d) => ({
-    label: d.title, kind: 'Sketch', group: 'Sketches', run: () => openDraw({ drawing: d }),
+  const sketches = q ? state.drawings.filter((d) => match(d.title) || (isWritten(d) && match(d.body || ''))).slice(0, 6).map((d) => ({
+    label: d.title, kind: isWritten(d) ? 'Note' : 'Sketch', group: 'Notes', run: () => openNoteItem(d),
   })) : [];
   const searchAll = q ? [{ label: `Search all tasks for “${q}”`, kind: 'Search', group: 'Tasks', run: () => setView({ type: 'search', id: q }) }] : [];
 
@@ -2277,8 +2289,7 @@ function openDraw({ drawing = null, taskId = null }) {
   const task = taskId || drawing?.task_id || null;
   const linked = task && taskById(task);
   $('#draw-title').value = drawing?.title || (linked ? `Sketch: ${plain(linked.content)}`.slice(0, 80) : '');
-  $('#draw-task').innerHTML = '<option value="">Not attached to a task</option>' + sortTasks(openTasks(), 'name').map((t) =>
-    `<option value="${t.id}" ${t.id === task ? 'selected' : ''}>↳ ${esc(plain(t.content).slice(0, 60))}</option>`).join('');
+  $('#draw-task').innerHTML = taskOptions(task);
   $('#draw-delete').classList.toggle('hidden', !drawing);
   $('#draw').classList.remove('hidden');
   requestAnimationFrame(() => {
@@ -2298,10 +2309,11 @@ async function closeDraw(force = false) {
 
 function sizeCanvas() {
   const canvas = $('#draw-canvas');
-  const rect = canvas.parentElement.getBoundingClientRect();
+  // clientWidth/Height, not the on-screen box: the window pops open with a scale, and measuring it mid-pop
+  // made the canvas too small, so strokes landed off to the right of the cursor.
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.round(rect.width * dpr);
-  canvas.height = Math.round(rect.height * dpr);
+  canvas.width = Math.round(canvas.clientWidth * dpr);
+  canvas.height = Math.round(canvas.clientHeight * dpr);
   pad2d.cache = document.createElement('canvas');
   pad2d.cache.width = canvas.width;
   pad2d.cache.height = canvas.height;
@@ -2388,25 +2400,121 @@ async function saveDrawing() {
   finally { btn.disabled = false; }
 }
 
-async function deleteDrawing() {
-  const d = pad2d.editing;
-  if (!d || !(await askConfirm('Delete this sketch?', { body: `“${d.title}” will be deleted. This can't be undone.`, ok: 'Delete', danger: true }))) return;
+async function deleteDrawing(d = pad2d.editing) {
+  const kind = isWritten(d) ? 'note' : 'sketch';
+  if (!d || !(await askConfirm(`Delete this ${kind}?`, { body: `“${d.title}” will be deleted. This can't be undone.`, ok: 'Delete', danger: true }))) return;
   try {
     await api('DELETE', `/api/drawings/${d.id}`);
     state.drawings = state.drawings.filter((x) => x.id !== d.id);
-    closeDraw(true);
+    if (pad2d.editing?.id === d.id) closeDraw(true);
+    if (noteEditing?.id === d.id) closeNote(true);
     render();
-    toast('Sketch deleted');
+    toast(kind === 'note' ? 'Note deleted' : 'Sketch deleted');
   } catch (err) { toast(err.message); }
 }
+
+// ---------- written notes ----------
+// A note is either a sketch or written text; both live in state.drawings, written ones have kind 'text'.
+const isWritten = (d) => d?.kind === 'text';
+const openNoteItem = (d) => d && (isWritten(d) ? openNote({ note: d }) : openDraw({ drawing: d }));
+const taskOptions = (task) => '<option value="">Not attached to a task</option>' + sortTasks(openTasks(), 'name').map((t) =>
+  `<option value="${t.id}" ${t.id === task ? 'selected' : ''}>↳ ${esc(plain(t.content).slice(0, 60))}</option>`).join('');
+let noteEditing = null;
+let noteDirty = false;
+
+function openNote({ note = null, taskId = null }) {
+  noteEditing = note;
+  noteDirty = false;
+  const task = taskId || note?.task_id || null;
+  const linked = task && taskById(task);
+  $('#note-title').value = note?.title || (linked ? `Note: ${plain(linked.content)}`.slice(0, 80) : '');
+  $('#note-task').innerHTML = taskOptions(task);
+  $('#note-body').value = note?.body || '';
+  $('#note-delete').classList.toggle('hidden', !note);
+  $('#note').classList.remove('hidden');
+  $('#note-body').focus();
+}
+
+async function closeNote(force = false) {
+  if (!force && noteDirty && !(await askConfirm('Discard this note?', { body: 'Your changes haven’t been saved.', ok: 'Discard', cancel: 'Keep writing', danger: true }))) return;
+  $('#note').classList.add('hidden');
+  noteEditing = null;
+}
+
+async function saveNote() {
+  const btn = $('#note-save');
+  btn.disabled = true;
+  try {
+    const saved = await api('POST', '/api/drawings', {
+      id: noteEditing?.id,
+      title: $('#note-title').value.trim() || plain($('#note-body').value.trim().split('\n')[0]).slice(0, 80) || 'Untitled note',
+      task_id: $('#note-task').value || null,
+      text: $('#note-body').value,
+    });
+    state.drawings = [saved, ...state.drawings.filter((d) => d.id !== saved.id)];
+    closeNote(true);
+    render();
+    toast('Note saved');
+  } catch (err) { toast(err.message); }
+  finally { btn.disabled = false; }
+}
+
+async function renameNote(d) {
+  const title = await askText(`Rename ${isWritten(d) ? 'note' : 'sketch'}`, { value: d.title, ok: 'Rename' });
+  if (!title?.trim() || title.trim() === d.title) return;
+  try {
+    const saved = await api('POST', `/api/drawings/${d.id}/meta`, { title: title.trim() });
+    state.drawings = state.drawings.map((x) => (x.id === d.id ? saved : x));
+    render();
+  } catch (err) { toast(err.message); }
+}
+
+// Right-click (or hold, on phones) a note: open, rename, jump to its task, or delete it.
+function openNoteMenu(card, x, y) {
+  const d = state.drawings.find((n) => n.id === card.dataset.sketch);
+  if (!d) return;
+  closeDropdown();
+  closeTaskMenu();
+  const task = d.task_id && taskById(d.task_id);
+  const items = [
+    ['external', 'Open', () => openNoteItem(d)],
+    ['pencil', 'Rename', () => renameNote(d)],
+    task && ['link', 'Go to task', () => openDetail(task.id)],
+    '-',
+    ['trash', 'Delete', () => deleteDrawing(d), 'danger'],
+  ].filter(Boolean);
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu ctx-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = items.map((it) => menuItem(items, it)).join('');
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const opt = e.target.closest('[data-i]');
+    if (!opt) return;
+    closeTaskMenu();
+    items[opt.dataset.i][2]();
+  });
+  showMenu(menu, x, y);
+  card.classList.add('menu-on');
+}
+
+(function setupNotePad() {
+  $('#note-body').addEventListener('input', () => (noteDirty = true));
+  $('#note-title').addEventListener('input', () => (noteDirty = true));
+  $('#note-task').addEventListener('change', () => (noteDirty = true));
+  $('#note-save').addEventListener('click', saveNote);
+  $('#note-cancel').addEventListener('click', () => closeNote());
+  $('#note-delete').addEventListener('click', () => deleteDrawing(noteEditing));
+})();
 
 (function setupDrawPad() {
   const canvas = $('#draw-canvas');
   $('#draw-colors').innerHTML = INKS.map((c, i) => `<button class="swatch ${i === 0 ? 'on' : ''}" data-ink="${c}" style="background:${c}"></button>`).join('');
   const point = (e) => {
     const r = canvas.getBoundingClientRect();
+    const k = canvas.clientWidth / (r.width || 1); // undo any scale on the window so the ink lands under the pointer
     // Mice report 0.5 pressure; pens report real pressure.
-    return [e.clientX - r.left, e.clientY - r.top, e.pointerType === 'pen' ? e.pressure || 0.5 : 0.5];
+    return [(e.clientX - r.left) * k, (e.clientY - r.top) * k, e.pointerType === 'pen' ? e.pressure || 0.5 : 0.5];
   };
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
@@ -2449,8 +2557,13 @@ async function deleteDrawing() {
   });
   $('#draw-save').addEventListener('click', saveDrawing);
   $('#draw-cancel').addEventListener('click', () => closeDraw());
-  $('#draw-delete').addEventListener('click', deleteDrawing);
-  window.addEventListener('resize', () => { if (!$('#draw').classList.contains('hidden')) sizeCanvas(); });
+  $('#draw-delete').addEventListener('click', () => deleteDrawing());
+  // Resize with the window, and once the opening pop has settled.
+  let drawn = '';
+  new ResizeObserver(() => {
+    const size = `${canvas.clientWidth}x${canvas.clientHeight}`;
+    if (size !== drawn && canvas.clientWidth && !$('#draw').classList.contains('hidden')) { drawn = size; sizeCanvas(); }
+  }).observe(canvas);
 })();
 
 // ---------- misc actions ----------
@@ -2872,6 +2985,8 @@ document.addEventListener('click', (e) => {
     if (a === 'add-section') return createSection();
     if (a === 'reschedule-overdue') return rescheduleOverdue(act);
     if (a === 'new-sketch') return openDraw({});
+    if (a === 'new-note') return openNote({});
+    if (a === 'h-note') return openNote({ taskId: target });
     if (a === 'h-today') return setDue(target, 'today');
     if (a === 'h-tomorrow') return setDue(target, 'tomorrow');
     if (a === 'h-deadline') return openDetail(target, '#d-deadline');
@@ -2883,7 +2998,7 @@ document.addEventListener('click', (e) => {
     }
   }
   const sketch = e.target.closest('[data-sketch]');
-  if (sketch) return openDraw({ drawing: state.drawings.find((d) => d.id === sketch.dataset.sketch) });
+  if (sketch) return openNoteItem(state.drawings.find((d) => d.id === sketch.dataset.sketch));
 
   const openLink = e.target.closest('[data-open]');
   if (openLink) { e.preventDefault(); return openDetail(openLink.dataset.open); }
@@ -3299,10 +3414,10 @@ function arrangeColumns(board) {
   $('[data-ask-ok]', modal).focus();
 }
 
-// On phones, hold a column's heading to open its menu (there's no right-click).
+// On phones, hold a column's heading or a note to open its menu (there's no right-click).
 let headHold = null;
 document.addEventListener('touchstart', (e) => {
-  const head = e.target.closest('.group-head[data-move], .group-head[data-section]');
+  const head = e.target.closest('.group-head[data-move], .group-head[data-section], .sketch[data-sketch], .thumb[data-sketch]');
   if (!head || e.touches.length > 1) return;
   const t = e.touches[0];
   clearTimeout(headHold?.timer);
@@ -3310,7 +3425,8 @@ document.addEventListener('touchstart', (e) => {
     headHold = null;
     navigator.vibrate?.(10);
     swipeEndedAt = Date.now(); // the lift-off isn't a tap
-    if (head.dataset.move) openColumnMenu(head, t.clientX, t.clientY);
+    if (head.dataset.sketch) openNoteMenu(head, t.clientX, t.clientY);
+    else if (head.dataset.move) openColumnMenu(head, t.clientX, t.clientY);
     else openSectionMenu(head.dataset.section, head, t.clientX, t.clientY);
   }, 450) };
 }, { passive: true });
@@ -3438,6 +3554,11 @@ $('#disconnect-btn').addEventListener('click', async () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (!$('#note').classList.contains('hidden')) {
+    if (e.key === 'Escape') { e.preventDefault(); return closeNote(); }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); return saveNote(); }
+    return;
+  }
   const drawing = !$('#draw').classList.contains('hidden');
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
   if (drawing) {

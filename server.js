@@ -313,7 +313,7 @@ app.post('/api/comments', requireToken, wrap(async (req, res) => {
   res.json(await td('POST', '/comments', { auth: req.token, body: req.body }));
 }));
 
-// ---- drawings (stored per user) ----
+// ---- notes: sketches and written notes (stored per user) ----
 
 const drawingsDir = (req) => path.join(userDir(req), 'drawings');
 const drawingFile = (req, id) => path.join(drawingsDir(req), `${id}.png`);
@@ -336,10 +336,13 @@ app.get('/api/drawings/:id.png', requireToken, (req, res) => {
   res.sendFile(drawingFile(req, req.params.id), (err) => err && res.status(404).end());
 });
 
+// Notes are either sketches (a PNG beside the index) or written notes (`kind: 'text'`, the text kept in the index).
 app.post('/api/drawings', requireToken, express.json({ limit: '25mb' }), (req, res) => {
-  const { id, title, task_id, image } = req.body || {};
-  const match = /^data:image\/png;base64,(.+)$/.exec(image || '');
-  if (!match) return res.status(400).json({ error: 'Expected a PNG data URL' });
+  const { id, title, task_id, image, text } = req.body || {};
+  const written = typeof text === 'string';
+  const match = !written && /^data:image\/png;base64,(.+)$/.exec(image || '');
+  if (!written && !match) return res.status(400).json({ error: 'Expected a PNG data URL or text' });
+  if (written && text.length > 200000) return res.status(400).json({ error: 'Note too long' });
   if (id && !validId(id)) return res.status(400).json({ error: 'Bad drawing id' });
   const list = readDrawings(req);
   const now = new Date().toISOString();
@@ -347,11 +350,25 @@ app.post('/api/drawings', requireToken, express.json({ limit: '25mb' }), (req, r
   if (drawing) {
     Object.assign(drawing, { title: title || drawing.title, task_id: task_id || null, updated_at: now });
   } else {
-    drawing = { id: crypto.randomBytes(8).toString('hex'), title: title || 'Untitled sketch', task_id: task_id || null, created_at: now, updated_at: now };
+    drawing = { id: crypto.randomBytes(8).toString('hex'), title: title || (written ? 'Untitled note' : 'Untitled sketch'), task_id: task_id || null, created_at: now, updated_at: now };
     list.unshift(drawing);
   }
   fs.mkdirSync(drawingsDir(req), { recursive: true });
-  fs.writeFileSync(drawingFile(req, drawing.id), Buffer.from(match[1], 'base64'));
+  if (written) Object.assign(drawing, { kind: 'text', body: text });
+  else fs.writeFileSync(drawingFile(req, drawing.id), Buffer.from(match[1], 'base64'));
+  writeDrawings(req, list);
+  res.json(drawing);
+});
+
+// Rename a note, or attach it to a different task, without sending the whole thing again.
+app.post('/api/drawings/:id/meta', requireToken, (req, res) => {
+  const { title, task_id } = req.body || {};
+  const list = readDrawings(req);
+  const drawing = validId(req.params.id) && list.find((d) => d.id === req.params.id);
+  if (!drawing) return res.status(404).json({ error: 'No such note' });
+  if (typeof title === 'string' && title.trim()) drawing.title = title.trim().slice(0, 200);
+  if (task_id !== undefined) drawing.task_id = task_id || null;
+  drawing.updated_at = new Date().toISOString();
   writeDrawings(req, list);
   res.json(drawing);
 });

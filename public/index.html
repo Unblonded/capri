@@ -146,6 +146,20 @@
     </div>
   </div>
 
+  <!-- Written note -->
+  <div id="note" class="modal draw-modal hidden">
+    <div class="modal-card glass draw-card note-card">
+      <div class="draw-head">
+        <input id="note-title" placeholder="Untitled note" />
+        <select id="note-task" class="btn sm" title="Attach to a task"></select>
+        <button class="btn ghost sm danger hidden" id="note-delete">Delete</button>
+        <button class="btn ghost sm" id="note-cancel">Cancel</button>
+        <button class="btn primary sm" id="note-save">Save</button>
+      </div>
+      <textarea id="note-body" class="note-body" placeholder="Write anything…"></textarea>
+    </div>
+  </div>
+
   <!-- Drawing pad -->
   <div id="draw" class="modal draw-modal hidden">
     <div class="modal-card glass draw-card">
@@ -190,7 +204,7 @@
         <kbd>S</kbd><span>Sketch for task</span>
         <kbd>F</kbd><span>Focus timer on task</span>
         <kbd>#</kbd><span>Delete</span>
-        <kbd>G then T U F B L D S C I</kbd><span>Today, Upcoming, Focus, Board, Deadlines, Dashboard, Sketches, Completed, Inbox</span>
+        <kbd>G then T U F B L D S C I</kbd><span>Today, Upcoming, Focus, Board, Deadlines, Dashboard, Notes, Completed, Inbox</span>
         <kbd>?</kbd><span>This help</span>
       </div>
     </div>
