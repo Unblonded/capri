@@ -346,7 +346,19 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .group-head.menu-on:is([data-section], [data-move]) { color: var(--accent); }
 .board .group-head[data-move] { cursor: grab; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .board { position: relative; }
-.column.col-dragging { position: relative; z-index: 5; box-shadow: 0 18px 44px var(--glass-shade), 0 0 0 2px var(--accent); }
+.column.col-source { opacity: .45; transition: opacity .15s; }
+.col-tag { position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none; display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 12px;
+  font-weight: 700; font-size: 13px; color: var(--text); background: var(--glass-strong); border: 1px solid var(--accent);
+  box-shadow: 0 14px 34px var(--glass-shade); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
+.col-tag svg { width: 15px; height: 15px; color: var(--accent); }
+.col-tag.no-drop { border-color: var(--glass-border); }
+.col-marker { position: fixed; z-index: 89; pointer-events: none; border-radius: 4px; background: var(--accent); box-shadow: 0 0 12px var(--accent); opacity: 0; transition: opacity .12s, left .12s, top .12s, width .12s, height .12s; }
+.col-marker.on { opacity: 1; }
+.arrange-list { position: relative; display: grid; gap: 6px; max-height: 60vh; overflow-y: auto; padding: 2px; }
+.arrange-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--glass-inset); border: 1px solid var(--glass-border);
+  cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; font-weight: 600; font-size: 14px; }
+.arrange-row .grip { color: var(--muted); letter-spacing: -2px; }
+.arrange-row.lifted { position: relative; z-index: 2; cursor: grabbing; border-color: var(--accent); box-shadow: 0 10px 24px var(--glass-shade); background: var(--glass-strong); }
 body.col-sorting, body.col-sorting * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
 .column .group-head.p1 { color: var(--p1); }
 .column .group-head.p2 { color: var(--p2); }

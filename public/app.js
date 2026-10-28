@@ -854,12 +854,14 @@ function openColumnMenu(head, x, y) {
   const keys = movableKeys(head.closest('.board'));
   const i = keys.indexOf(head.dataset.move);
   const sec = head.dataset.section;
+  const stacked = head.closest('.board').classList.contains('stacked');
   closeDropdown();
   closeTaskMenu();
   const items = [
     sec && ['pencil', 'Rename', () => renameSection(sec)],
-    i > 0 && ['back', 'Move left', () => moveColumn(head, -1)],
-    i < keys.length - 1 && ['arrow', 'Move right', () => moveColumn(head, 1)],
+    i > 0 && ['back', stacked ? 'Move earlier' : 'Move left', () => moveColumn(head, -1)],
+    i < keys.length - 1 && ['arrow', stacked ? 'Move later' : 'Move right', () => moveColumn(head, 1)],
+    keys.length > 2 && ['board', 'Arrange columns…', () => arrangeColumns(head.closest('.board'))],
     sec && '-',
     sec && ['trash', 'Delete section', () => deleteSection(sec), 'danger'],
   ].filter(Boolean);
@@ -3061,96 +3063,165 @@ document.addEventListener('contextmenu', (e) => { if (hold) { e.preventDefault()
 
 // Drag a board column by its heading (mouse). Neighbours slide aside as it passes their middle;
 // letting go saves the new order.
+// Drag a board column by its heading (mouse). Nothing reflows while you drag: a tag with the
+// column's name follows the pointer and a line shows where it'll land; letting go moves it there.
 let colDrag = null;
 document.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || e.pointerType !== 'mouse') return;
   const head = e.target.closest('.board .group-head[data-move]');
   if (!head || e.target.closest('button')) return;
-  const col = head.closest('.column');
-  const r = col.getBoundingClientRect();
-  colDrag = { col, board: col.closest('.board'), x: e.clientX, y: e.clientY, gx: e.clientX - r.left, gy: e.clientY - r.top, on: false };
+  colDrag = { head, col: head.closest('.column'), board: head.closest('.board'), x: e.clientX, y: e.clientY, cx: e.clientX, cy: e.clientY, on: false };
 });
 document.addEventListener('pointermove', (e) => {
   const d = colDrag;
   if (!d) return;
+  d.cx = e.clientX;
+  d.cy = e.clientY;
   if (!d.on) {
     if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6) return;
-    d.on = true;
-    d.col.classList.add('col-dragging');
-    document.body.classList.add('col-sorting');
+    liftColumn(d);
   }
   e.preventDefault();
-  // Nudge the view along near its top and bottom.
-  const view = $('#view');
-  const vr = view.getBoundingClientRect();
-  if (e.clientY < vr.top + 60) view.scrollTop -= 14;
-  else if (e.clientY > vr.bottom - 60) view.scrollTop += 14;
-  // The dragged column's top-left in the board's own coordinates; offsetLeft/Top ignore transforms,
-  // so columns still sliding aside don't throw the maths off.
-  const br = d.board.getBoundingClientRect();
-  const px = e.clientX - br.left - d.gx;
-  const py = e.clientY - br.top - d.gy;
-  placeColumn(d, px + d.col.offsetWidth / 2, py + Math.min(d.col.offsetHeight, 80) / 2);
-  d.col.style.transform = `translate(${px - d.col.offsetLeft}px, ${py - d.col.offsetTop}px)`;
+  // Beside the pointer, flipping to its left near the right edge.
+  const tx = e.clientX + 14 + d.tag.offsetWidth > innerWidth - 8 ? e.clientX - 14 - d.tag.offsetWidth : e.clientX + 14;
+  d.tag.style.transform = `translate(${tx}px, ${e.clientY + 10}px)`;
+  aimColumn(d);
 });
-// Moves the dragged column into the lane under it, above the first column whose middle it's over.
-function placeColumn(d, cx, cy) {
-  const movable = (c) => c !== d.col && c.querySelector('.group-head[data-move]');
-  const lanes = $$(':scope > .lane', d.board);
-  const lane = lanes.find((l) => cx < l.offsetLeft + l.offsetWidth + COL_GAP / 2) || lanes.at(-1);
-  if (!lane) return;
-  let ref = [...lane.children].filter(movable).find((c) => cy < c.offsetTop + c.offsetHeight / 2)
-    || $(':scope > .add-col', lane);
-  // A lane of its own (side by side): pass a neighbour's middle to swap lanes with it.
-  if (!d.board.classList.contains('stacked') && lane !== d.col.parentElement) {
-    const other = [...lane.children].find(movable);
-    if (!other) return;
-    const target = cx < lane.offsetLeft + lane.offsetWidth / 2 ? lane : lane.nextElementSibling;
-    const mine = d.col.parentElement;
-    if (target === mine || target === mine.nextElementSibling && lanes.indexOf(lane) > lanes.indexOf(mine)) return;
-    const was = new Map(lanes.map((l) => [l, l.offsetLeft]));
-    d.board.insertBefore(mine, target);
-    slideFrom(was, lanes);
-    return;
-  }
-  if (d.col.parentElement === lane && (d.col.nextElementSibling || null) === (ref || null)) return;
-  const all = $$('.column', d.board).filter((c) => c !== d.col);
-  const was = new Map(all.map((c) => [c, [c.offsetLeft, c.offsetTop]]));
-  lane.insertBefore(d.col, ref || null);
-  for (const c of all) {
-    const [x, y] = was.get(c);
-    const dx = x - c.offsetLeft;
-    const dy = y - c.offsetTop;
-    if (dx || dy) c.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' });
-  }
+function liftColumn(d) {
+  d.on = true;
+  closeTaskMenu();
+  d.col.classList.add('col-source');
+  document.body.classList.add('col-sorting');
+  d.tag = document.createElement('div');
+  d.tag.className = 'col-tag';
+  d.tag.innerHTML = `${ic('board')}<span>${esc(d.head.firstChild.textContent.trim())}</span>`;
+  d.marker = document.createElement('div');
+  d.marker.className = 'col-marker';
+  document.body.append(d.tag, d.marker);
+  // Keep scrolling while the pointer rests near the top or bottom edge.
+  const view = $('#view');
+  const step = () => {
+    if (colDrag !== d) return;
+    const v = view.getBoundingClientRect();
+    const dir = d.cy < v.top + 60 ? -1 : d.cy > v.bottom - 60 ? 1 : 0;
+    if (dir) { view.scrollTop += dir * 16; aimColumn(d); }
+    d.raf = requestAnimationFrame(step);
+  };
+  d.raf = requestAnimationFrame(step);
 }
-function slideFrom(was, els) {
-  for (const el of els) {
-    const dx = was.get(el) - el.offsetLeft;
-    if (dx) el.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' });
+// Picks the column nearest the pointer and which side of it the dragged one would go.
+function aimColumn(d) {
+  const stacked = d.board.classList.contains('stacked');
+  let best = null;
+  for (const c of $$('.column', d.board)) {
+    if (c === d.col || !c.querySelector('.group-head[data-move]')) continue;
+    const r = c.getBoundingClientRect();
+    const dx = Math.max(r.left - d.cx, 0, d.cx - r.right);
+    const dy = Math.max(r.top - d.cy, 0, d.cy - r.bottom);
+    const dist = Math.hypot(dx, dy);
+    if (!best || dist < best.dist) best = { c, r, dist };
   }
+  const keys = movableKeys(d.board);
+  const from = d.head.dataset.move;
+  d.drop = null;
+  if (best) {
+    const { c, r } = best;
+    // Side by side, the left or right half decides; stacked in lanes, the top or bottom half.
+    const after = stacked ? d.cy > r.top + Math.min(r.height, 160) / 2 : d.cx > r.left + r.width / 2;
+    const key = $('.group-head[data-move]', c).dataset.move;
+    const rest = keys.filter((k) => k !== from);
+    rest.splice(rest.indexOf(key) + (after ? 1 : 0), 0, from);
+    if (rest.join() !== keys.join()) {
+      d.drop = rest;
+      const m = d.marker.style;
+      if (stacked) Object.assign(m, { left: `${r.left}px`, top: `${(after ? r.bottom : r.top) + (after ? 7 : -7) - 2}px`, width: `${r.width}px`, height: '4px' });
+      else Object.assign(m, { left: `${(after ? r.right + 7 : r.left - 7) - 2}px`, top: `${r.top}px`, width: '4px', height: `${Math.min(r.height, innerHeight - r.top - 16)}px` });
+    }
+  }
+  d.marker.classList.toggle('on', !!d.drop);
+  d.tag.classList.toggle('no-drop', !d.drop);
 }
-function endColDrag() {
+function endColDrag(e) {
   const d = colDrag;
   colDrag = null;
   if (!d?.on) return;
+  cancelAnimationFrame(d.raf);
   document.body.classList.remove('col-sorting');
-  const keys = movableKeys(d.board);
-  const by = d.board.dataset.by;
-  const was = by === 'section' ? projectSections(state.view.id).map((x) => x.id) : boardOrder.keys.filter((k) => keys.includes(k));
-  if (keys.join() !== was.join()) {
-    // Lanes are re-split for the new order; everything glides from where it is, the dropped column too.
-    flipColumns(() => saveColumnOrder(by, keys));
-    return;
-  }
-  const from = d.col.style.transform;
-  d.col.style.transform = '';
-  d.col.classList.remove('col-dragging');
-  if (from && !reducedMotion()) d.col.animate([{ transform: from }, { transform: 'none' }], { duration: 180, easing: 'ease-out' });
-  layoutBoard();
+  d.tag.remove();
+  d.marker.remove();
+  d.col.classList.remove('col-source');
+  if (d.drop && e?.type === 'pointerup') flipColumns(() => saveColumnOrder(d.board.dataset.by, d.drop));
 }
 document.addEventListener('pointerup', endColDrag);
 document.addEventListener('pointercancel', endColDrag);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && colDrag?.on) { e.stopPropagation(); endColDrag(); } }, true);
+
+// Arrange columns: the board's movable columns as a list you drag into order (mouse or touch).
+function arrangeColumns(board) {
+  const by = board.dataset.by;
+  const heads = $$('.group-head[data-move]', board);
+  const modal = document.createElement('div');
+  modal.className = 'modal ask-modal';
+  modal.innerHTML = `<div class="modal-card glass ask-card arrange-card">
+    <h3>Arrange columns</h3>
+    <p class="muted small">Drag to reorder.</p>
+    <div class="arrange-list">${heads.map((h) => `<div class="arrange-row" data-key="${esc(h.dataset.move)}">
+      <span class="grip">⋮⋮</span><span class="dd-text">${esc(h.firstChild.textContent.trim())}</span></div>`).join('')}</div>
+    <div class="ask-actions"><button type="button" class="btn" data-ask-cancel>Cancel</button><button type="button" class="btn primary" data-ask-ok>Save</button></div>
+  </div>`;
+  const list = $('.arrange-list', modal);
+  const done = (save) => {
+    modal.remove();
+    const keys = $$('.arrange-row', list).map((r) => r.dataset.key);
+    if (save && keys.join() !== heads.map((h) => h.dataset.move).join()) flipColumns(() => saveColumnOrder(by, keys));
+  };
+  modal.addEventListener('click', (e) => {
+    if (e.target.closest('[data-ask-ok]')) done(true);
+    else if (e.target.closest('[data-ask-cancel]') || e.target === modal) done(false);
+  });
+  modal.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') done(false); });
+  // Rows trade places as the dragged one passes their middle.
+  let drag = null;
+  list.addEventListener('pointerdown', (e) => {
+    const row = e.target.closest('.arrange-row');
+    if (!row) return;
+    e.preventDefault();
+    row.setPointerCapture(e.pointerId);
+    drag = { row, y: e.clientY, top0: row.offsetTop };
+    row.classList.add('lifted');
+  });
+  list.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const { row } = drag;
+    const mid = Math.max(0, Math.min(drag.top0 + (e.clientY - drag.y), list.scrollHeight - row.offsetHeight)) + row.offsetHeight / 2;
+    const others = $$('.arrange-row', list).filter((r) => r !== row);
+    const before = others.find((r) => mid < r.offsetTop + r.offsetHeight / 2) || null;
+    if ((row.nextElementSibling || null) !== before) {
+      const was = new Map(others.map((r) => [r, r.offsetTop]));
+      list.insertBefore(row, before);
+      for (const r of others) {
+        const dy = was.get(r) - r.offsetTop;
+        if (dy) r.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 160, easing: 'ease-out' });
+      }
+    }
+    // Kept inside the list, so it never slides out of view.
+    const top = Math.max(0, Math.min(drag.top0 + (e.clientY - drag.y), list.scrollHeight - row.offsetHeight));
+    row.style.transform = `translateY(${top - row.offsetTop}px)`;
+  });
+  const drop = () => {
+    if (!drag) return;
+    const { row } = drag;
+    drag = null;
+    const from = row.style.transform;
+    row.style.transform = '';
+    row.classList.remove('lifted');
+    if (from) row.animate([{ transform: from }, { transform: 'none' }], { duration: 140, easing: 'ease-out' });
+  };
+  list.addEventListener('pointerup', drop);
+  list.addEventListener('pointercancel', drop);
+  document.body.appendChild(modal);
+  $('[data-ask-ok]', modal).focus();
+}
 
 // On phones, hold a column's heading to open its menu (there's no right-click).
 let headHold = null;
@@ -3291,7 +3362,7 @@ async function autoSync(minGap) {
   minGap ??= document.hidden ? BACKGROUND_SYNC_MS : AUTO_SYNC_MS;
   if (Date.now() - state.lastSync < minGap) return;
   // Not mid-gesture or mid-drag, and not while your own changes are still saving.
-  if (swipe || hold || $('.task.dragging') || writes.pending || ddOpen || datePop || ctxMenu) return;
+  if (swipe || hold || colDrag?.on || $('.task.dragging') || writes.pending || ddOpen || datePop || ctxMenu) return;
   const a = document.activeElement;
   if (a?.matches('input, textarea') && !$('#detail').contains(a)) return; // typing somewhere a redraw would clear
   autoSyncing = true;
