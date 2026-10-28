@@ -201,14 +201,32 @@ app.get('/auth/callback', wrap(async (req, res) => {
 }));
 
 // Everything the UI needs on load, in one round trip.
+// Phone and desktop both sync every few seconds. Requests for the same account that land within a
+// couple of seconds share one trip to Todoist, which keeps syncs quick and well inside its rate limit.
+// Any change made through Capri drops the shared copy, so the next sync is always fresh.
+const BOOTSTRAP_SHARE_MS = 2500;
+const bootstrapShared = new Map(); // user id → { at, data: Promise }
+app.use('/api', (req, res, next) => {
+  if (req.method !== 'GET' && req.token) bootstrapShared.delete(userIdFor(req.token));
+  next();
+});
+
 app.get('/api/bootstrap', requireToken, wrap(async (req, res) => {
-  const [projects, sections, labels, tasks] = await Promise.all([
-    tdAll(req.token, '/projects'),
-    tdAll(req.token, '/sections'),
-    tdAll(req.token, '/labels'),
-    tdAll(req.token, '/tasks'),
-  ]);
-  res.json({ projects, sections, labels, tasks });
+  const key = userIdFor(req.token);
+  let hit = bootstrapShared.get(key);
+  if (!hit || Date.now() - hit.at > BOOTSTRAP_SHARE_MS) {
+    const data = Promise.all([
+      tdAll(req.token, '/projects'),
+      tdAll(req.token, '/sections'),
+      tdAll(req.token, '/labels'),
+      tdAll(req.token, '/tasks'),
+    ]).then(([projects, sections, labels, tasks]) => ({ projects, sections, labels, tasks }));
+    hit = { at: Date.now(), data };
+    bootstrapShared.set(key, hit);
+    data.catch(() => { if (bootstrapShared.get(key) === hit) bootstrapShared.delete(key); });
+    setTimeout(() => { if (bootstrapShared.get(key) === hit) bootstrapShared.delete(key); }, BOOTSTRAP_SHARE_MS * 2).unref();
+  }
+  res.json(await hit.data);
 }));
 
 app.get('/api/completed', requireToken, wrap(async (req, res) => {

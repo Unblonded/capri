@@ -908,6 +908,13 @@ html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -we
 
 /* ---- completing ---- */
 .task.done-anim { animation: done .55s var(--ease-out) forwards; }
+.task.reopen-anim { animation: reopen .48s var(--ease-out) forwards; pointer-events: none; }
+.task.reopen-anim .task-content { text-decoration-color: transparent !important; color: var(--text) !important; transition: text-decoration-color .25s, color .25s; }
+@keyframes reopen {
+  0% { background-color: transparent; }
+  35% { background-color: var(--accent-soft); transform: scale(1.01); opacity: 1; }
+  100% { background-color: var(--accent-soft); transform: translateY(-10px) scale(.98); opacity: 0; filter: blur(3px); }
+}
 .task.leave-anim { animation: leave .26s cubic-bezier(.4, 0, 1, 1) forwards; pointer-events: none; }
 @keyframes leave { to { opacity: 0; transform: translateX(28px) scale(.97); filter: blur(3px); } }
 .task.done-anim .check { animation: check-pop .5s var(--spring); }

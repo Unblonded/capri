@@ -128,6 +128,7 @@ async function sync({ quiet = false, auto = false } = {}) {
     // Nothing changed since last time: don't redraw under the user.
     const fingerprint = JSON.stringify([data, drawings]);
     if (auto && fingerprint === lastSyncFingerprint) { state.lastSync = Date.now(); return; }
+    const firstLoad = !lastSyncFingerprint;
     lastSyncFingerprint = fingerprint;
     data.tasks = data.tasks.filter((x) => !pendingDeletes.has(x.id) && !pendingDeletes.has(x.parent_id));
     Object.assign(state, data, { drawings, lastSync: Date.now() });
@@ -135,7 +136,7 @@ async function sync({ quiet = false, auto = false } = {}) {
     const before = taskRowsOnScreen();
     render();
     // First load and a tap on Sync flow the whole list in; background syncs only move what changed.
-    animateSync(before, { full: !quiet || !before.size, edits: true });
+    animateSync(before, { full: !quiet || firstLoad, edits: true });
     if (!quiet) toast('Synced with Todoist');
   } catch (err) {
     if (!quiet) toast(err.message);
@@ -1587,6 +1588,41 @@ async function reopenTask(id) {
   } catch (err) { toast(err.message); }
 }
 
+// Reopening from the Completed list: the tick clears and the strike-through lifts, the row glows and
+// rises away, then the rest of the list closes the gap.
+async function reopenFromCompleted(row) {
+  const id = row.dataset.reopen;
+  if (row.classList.contains('reopen-anim')) return;
+  row.classList.add('reopen-anim');
+  $('.check', row)?.classList.remove('checked');
+  try {
+    await Promise.all([api('POST', `/api/tasks/${id}/reopen`), new Promise((r) => setTimeout(r, reducedMotion() ? 0 : 480))]);
+  } catch (err) {
+    row.classList.remove('reopen-anim');
+    $('.check', row)?.classList.add('checked');
+    return toast(err.message);
+  }
+  const view = $('#view');
+  const movers = $$('.task[data-reopen], .group-head, .empty', view).filter((el) => el !== row);
+  const before = new Map(movers.map((el) => [el, el.getBoundingClientRect()]));
+  const section = row.closest('.group');
+  row.remove();
+  if (section && !$('[data-reopen]', section)) section.remove();
+  else if (section) { const n = $('.group-head .muted', section); if (n) n.textContent = String($$('[data-reopen]', section).length); }
+  if (!$('[data-reopen]', view)) view.innerHTML = empty('done', 'Nothing completed in the last week yet.');
+  if (!reducedMotion()) {
+    for (const [el, r] of before) {
+      if (!el.isConnected) continue;
+      const dy = r.top - el.getBoundingClientRect().top;
+      if (Math.abs(dy) > 1) el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 480, easing: SYNC_EASE });
+    }
+  }
+  if (state.doneToday) state.doneToday--;
+  // Fetch the reopened task once the list has settled; redrawing sooner would cut the glide short.
+  setTimeout(() => sync({ quiet: true }), 560);
+  toast('Task reopened');
+}
+
 async function deleteTask(id) {
   const t = taskById(id);
   if (!t || !(await askConfirm('Delete this task?', { body: `“${plain(t.content)}” will be deleted from Todoist. This can't be undone.`, ok: 'Delete', danger: true }))) return;
@@ -2424,7 +2460,7 @@ document.addEventListener('click', (e) => {
     const target = rowId || state.detailId;
     if (a === 'complete' && rowId) return completeTask(rowId);
     if (a === 'complete-detail') return completeTask(state.detailId);
-    if (a === 'reopen') return reopenTask(act.closest('[data-reopen]').dataset.reopen);
+    if (a === 'reopen') return reopenFromCompleted(act.closest('[data-reopen]'));
     if (a === 'add') return openQuick(JSON.parse(act.dataset.ctx || 'null'));
     if (a === 'close-detail') return closeDetail();
     if (a === 'delete') return deleteTask(state.detailId);
@@ -2664,11 +2700,15 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('hashchange', applyHash);
 // ---------- auto-sync ----------
 // Picks up changes made elsewhere (the Todoist app, another device) without pressing Sync:
-// every 20s while Capri is on screen, and straight away when you come back to it.
-const AUTO_SYNC_MS = 20000;
+// every 8s while Capri is on screen, every 45s in the background (so it's already current when you
+// come back), and straight away when you return. Phones pause hidden web apps, so there it's the
+// catch-up on return that counts.
+const AUTO_SYNC_MS = 8000;
+const BACKGROUND_SYNC_MS = 45000;
 let autoSyncing = false;
-async function autoSync(minGap = AUTO_SYNC_MS) {
-  if (autoSyncing || document.hidden || $('#app').classList.contains('hidden')) return;
+async function autoSync(minGap) {
+  if (autoSyncing || $('#app').classList.contains('hidden')) return;
+  minGap ??= document.hidden ? BACKGROUND_SYNC_MS : AUTO_SYNC_MS;
   if (Date.now() - state.lastSync < minGap) return;
   // Not mid-gesture or mid-drag, and not while your own changes are still saving.
   if (swipe || $('.task.dragging') || writes.pending || ddOpen || datePop || ctxMenu) return;
@@ -2677,9 +2717,10 @@ async function autoSync(minGap = AUTO_SYNC_MS) {
   autoSyncing = true;
   try { await sync({ quiet: true, auto: true }); } finally { autoSyncing = false; }
 }
-setInterval(() => autoSync(), 5000);
-document.addEventListener('visibilitychange', () => autoSync(5000));
-window.addEventListener('focus', () => autoSync(5000));
+setInterval(() => autoSync(), 2000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) autoSync(1000); });
+window.addEventListener('focus', () => autoSync(1000));
+window.addEventListener('pageshow', () => autoSync(1000));
 window.addEventListener('online', () => autoSync(0));
 
 $$('[data-ic]').forEach((el) => { el.outerHTML = ic(el.dataset.ic); });
