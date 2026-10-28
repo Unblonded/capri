@@ -421,6 +421,36 @@ app.post('/api/deadlines', requireToken, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- schedule (stored per user): day → time blocks like "go outside 15:05–16:03" ----
+
+const scheduleFile = (req) => path.join(userDir(req), 'schedule.json');
+function readSchedule(req) {
+  try { return JSON.parse(fs.readFileSync(scheduleFile(req), 'utf8')); } catch { return {}; }
+}
+
+app.get('/api/schedule', requireToken, (req, res) => res.json(readSchedule(req)));
+
+// { day: 'YYYY-MM-DD', blocks: [{ id, title, start: 'HH:MM', end: 'HH:MM', done? }] } replaces that day's blocks.
+app.post('/api/schedule', requireToken, (req, res) => {
+  const { day, blocks } = req.body || {};
+  const hhmm = (t) => typeof t === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day || '')) return res.status(400).json({ error: 'Bad day' });
+  if (!Array.isArray(blocks) || blocks.length > 100) return res.status(400).json({ error: 'Expected up to 100 blocks' });
+  const clean = [];
+  for (const b of blocks) {
+    if (!b || typeof b.title !== 'string' || !b.title.trim() || !hhmm(b.start) || !hhmm(b.end) || !/^[\w-]{1,40}$/.test(b.id || '')) {
+      return res.status(400).json({ error: 'Bad block' });
+    }
+    clean.push({ id: b.id, title: b.title.trim().slice(0, 200), start: b.start, end: b.end, ...(b.done ? { done: true } : {}) });
+  }
+  const all = readSchedule(req);
+  if (clean.length) all[day] = clean;
+  else delete all[day];
+  fs.mkdirSync(userDir(req), { recursive: true });
+  fs.writeFileSync(scheduleFile(req), JSON.stringify(all, null, 2));
+  res.json({ ok: true });
+});
+
 app.delete('/api/drawings/:id', requireToken, (req, res) => {
   if (!validId(req.params.id)) return res.status(404).end();
   writeDrawings(req, readDrawings(req).filter((d) => d.id !== req.params.id));

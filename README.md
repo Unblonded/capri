@@ -20,7 +20,7 @@ There are no Capri accounts or passwords: **your Todoist token is your login.**
 
 - Each browser or desktop app keeps its own token in an `HttpOnly` cookie (marked `Secure` over HTTPS), valid for a year. *Sign out* in the sidebar clears it.
 - The server never stores tokens. It reads the cookie on each request and uses it to call the Todoist API v1 on that person's behalf, so several people can share one Capri server and each only sees their own Todoist.
-- Capri's own data (notes and sketches, deadlines, the order of board columns) is stored per person under `data/users/<hash of token>/`. The folder name is a one-way SHA-256 hash, so the token can't be recovered from it. That data follows your token, so if you regenerate your Todoist token you start fresh.
+- Capri's own data (notes and sketches, your schedule, deadlines, the order of board columns) is stored per person under `data/users/<hash of token>/`. The folder name is a one-way SHA-256 hash, so the token can't be recovered from it. That data follows your token, so if you regenerate your Todoist token you start fresh.
 
 ## Hosting it on a domain (e.g. https://capri.kalculator.lol)
 
@@ -112,6 +112,7 @@ The apps are ad-hoc signed, not notarised (that needs a paid Apple Developer acc
 
 - **Liquid glass UI** — frosted translucent panels over a slowly drifting colour backdrop, in light and dark, with a custom line-icon set (the date badge is a little calendar showing the day)
 - **Deadlines** — separate from the do date. Set one in the task drawer (date picker + quick chips), in quick add (date pill or `{friday}`), or press `D`. Capri keeps deadlines on its own server under your account, so they work without Todoist Pro (they don't show in the Todoist app). Older `Deadline: YYYY-MM-DD` lines in task descriptions are moved over automatically. Countdown badges, a Deadlines view, a "deadline reached" group in Today, a heads-up banner, and a warning when a task is scheduled after its deadline
+- **Schedule** — plan your day in time blocks by typing them the way you'd write them: `go outside 3:05 - 4:03`, `5pm-8pm dinner`, `gym 7 - 8` (one per line, or paste a whole list; times without am/pm are read as you'd mean them). Blocks sit on a timeline with a line for now; step between days, click an empty time to start a block there, click a block to edit it, right-click (or hold) to mark it done, copy it to tomorrow or delete it. Today shows what's on now or next. Saved on the server under your token
 - **Notes** — written notes and sketches in one place. Sketches use a drawing pad (pen, highlighter, eraser, colours, sizes, undo/redo, pressure on pen tablets); written notes are plain text. Keep them on their own or attach them to a task (they show in its details). Right-click a note (or hold it on a phone) to open, rename, jump to its task or delete it. They're stored on the server under your token
 - **QoL** — hover actions on every task, multi-select (`X` or ⇧/⌘-click) with a bulk bar, drag tasks onto days / projects / Today, collapsible groups, a focus timer (25/5) linked to a task, today's progress bar (one segment per task, "3 of 7 done"), duplicate/copy task, date pickers + quick chips, and a `?` shortcut sheet
 - Recurring tasks are protected: bulk reschedules skip them, and one-off changes ask first
@@ -132,7 +133,7 @@ The apps are ad-hoc signed, not notarised (that needs a paid Apple Developer acc
 | `s` | New sketch (attached to selected task) |
 | `f` | Start focus timer on selected task |
 | `#` | Delete selected task |
-| `g` then `t` `u` `l` `f` `b` `d` `s` `c` `i` | Today / Upcoming / Deadlines / Focus / Board / Dashboard / Notes / Completed / Inbox |
+| `g` then `t` `u` `l` `f` `b` `d` `s` `h` `c` `i` | Today / Upcoming / Deadlines / Focus / Board / Dashboard / Notes / Schedule / Completed / Inbox |
 | `?` | Shortcut sheet |
 | `Esc` | Close drawer, dialog or selection |
 

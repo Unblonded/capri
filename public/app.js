@@ -28,6 +28,7 @@ const ICONS = {
   pencil: '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/><path d="M14.5 5.5l3 3"/>',
   marker: '<path d="M9.5 14.5L5 19h4.5l2-2"/><path d="M14 4l6 6-8.5 8.5-6-6z"/>',
   eraser: '<path d="M8 21h12"/><path d="M5.5 14.5l9-9a2 2 0 0 1 2.8 0l2.2 2.2a2 2 0 0 1 0 2.8L11 19H9.5z"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   timer: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 10v3.5l2.5 2M9.5 2.5h5M19 6l1.5-1.5"/>',
   comment: '<path d="M20.5 12a8.5 8.5 0 0 1-12.4 7.5L3.5 21l1.4-4.4A8.5 8.5 0 1 1 20.5 12z"/>',
   subtask: '<path d="M6 3v11a3 3 0 0 0 3 3h10"/><path d="M15.5 13.5L19 17l-3.5 3.5"/>',
@@ -76,7 +77,7 @@ function calIcon(day) {
 const prioClass = (p) => (p === 4 ? 'p1' : p === 3 ? 'p2' : p === 2 ? 'p3' : 'p4');
 
 const state = {
-  projects: [], sections: [], labels: [], tasks: [], drawings: [],
+  projects: [], sections: [], labels: [], tasks: [], drawings: [], schedule: {},
   deadlines: {}, prefs: {}, // kept on Capri's server, per person
   view: { type: 'today' },
   selectedId: null,
@@ -127,17 +128,17 @@ let lastSyncFingerprint = '';
 async function sync({ quiet = false, auto = false } = {}) {
   const seq = writes.seq;
   try {
-    const [data, { drawings }, deadlines, prefs] = await Promise.all([
-      api('GET', '/api/bootstrap'), api('GET', '/api/drawings'), api('GET', '/api/deadlines'), api('GET', '/api/prefs')]);
+    const [data, { drawings }, deadlines, prefs, schedule] = await Promise.all([
+      api('GET', '/api/bootstrap'), api('GET', '/api/drawings'), api('GET', '/api/deadlines'), api('GET', '/api/prefs'), api('GET', '/api/schedule')]);
     // You changed something while this was loading; the next sync will include it.
     if (auto && (writes.pending || writes.seq !== seq)) return;
     // Nothing changed since last time: don't redraw under the user.
-    const fingerprint = JSON.stringify([data, drawings, deadlines, prefs]);
+    const fingerprint = JSON.stringify([data, drawings, deadlines, prefs, schedule]);
     if (auto && fingerprint === lastSyncFingerprint) { state.lastSync = Date.now(); return; }
     const firstLoad = !lastSyncFingerprint;
     lastSyncFingerprint = fingerprint;
     data.tasks = data.tasks.filter((x) => !pendingDeletes.has(x.id) && !pendingDeletes.has(x.parent_id));
-    Object.assign(state, data, { drawings, deadlines, prefs, lastSync: Date.now() });
+    Object.assign(state, data, { drawings, deadlines, prefs, schedule, lastSync: Date.now() });
     loadDoneToday();
     const before = taskRowsOnScreen();
     render();
@@ -882,6 +883,8 @@ function openColumnMenu(head, x, y) {
 }
 
 document.addEventListener('contextmenu', (e) => {
+  const block = e.target.closest('.sblock[data-block]');
+  if (block) { e.preventDefault(); return openBlockMenu(block, e.clientX, e.clientY); }
   const note = e.target.closest('.sketch[data-sketch], .thumb[data-sketch]');
   if (note) { e.preventDefault(); return openNoteMenu(note, e.clientX, e.clientY); }
   const head = e.target.closest('.group-head[data-move], .group-head[data-section]');
@@ -1126,6 +1129,7 @@ function renderSidebar() {
     navItem({ type: 'upcoming', ico: 'calendar', name: 'Upcoming', count: upcoming }),
     navItem({ type: 'deadlines', ico: 'flag', name: 'Deadlines', count: dlSoon.length, alert: dlOverdue }),
     navItem({ type: 'focus', ico: 'timer', name: 'Focus', count: focus }),
+    navItem({ type: 'schedule', ico: 'clock', name: 'Schedule', count: dayBlocks(today()).filter((b) => !b.done && toMin(b.end) > nowMin()).length }),
     navItem({ type: 'board', ico: 'board', name: 'Board' }),
     navItem({ type: 'sketches', ico: 'pencil', name: 'Notes', count: state.drawings.length }),
     navItem({ type: 'completed', ico: 'done', name: 'Completed' }),
@@ -1411,6 +1415,258 @@ function renderRing() {
   ring.innerHTML = `${track}<span class="dp-text">${text}</span>`;
 }
 
+
+// ---------- schedule ----------
+// Time blocks for a day, typed the way you'd write them: "go outside 3:05 - 4:03", "5pm-8pm do something".
+const t0 = () => today();
+const toMin = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
+const fromMin = (n) => `${pad(Math.floor(n / 60))}:${pad(n % 60)}`;
+const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+const dayBlocks = (day) => state.schedule?.[day] || [];
+const blockSpan = (b) => `${fmtTime(b.start)} – ${fmtTime(b.end)}`;
+const lengthText = (mins) => (mins >= 60 ? `${Math.floor(mins / 60)}h${mins % 60 ? ` ${mins % 60}m` : ''}` : `${mins}m`);
+
+// One line → { title, start, end }, or null. Times without am/pm are guessed the way people mean them:
+// 1–6 is the afternoon, 7–11 the morning, 13+ is 24-hour; an end before its start moves to the afternoon.
+function parseBlock(line) {
+  const T = '(\\d{1,2})(?:[:.](\\d{2}))?\\s*(am|pm|a|p)?';
+  const SEP = '\\s*(?:-|–|—|to|until|till)\\s*';
+  let m = new RegExp(`^(.+?)\\s*(?:from\\s+|at\\s+|@\\s*|:\\s*)?${T}${SEP}${T}\\.?$`, 'i').exec(line.trim());
+  let title, a, b;
+  if (m) { title = m[1]; a = m.slice(2, 5); b = m.slice(5, 8); }
+  else {
+    m = new RegExp(`^${T}${SEP}${T}\\s*[:\\-–,]?\\s*(.+)$`, 'i').exec(line.trim());
+    if (!m) return null;
+    a = m.slice(1, 4); b = m.slice(4, 7); title = m[7];
+  }
+  title = title.replace(/[\s:,\-–—@]+$/, '').replace(/\s+(from|at)$/i, '').trim();
+  if (!title) return null;
+  const mer = (x) => (x ? (x[0].toLowerCase() === 'p' ? 'pm' : 'am') : null);
+  const hours = ([h, mm, x], other) => {
+    h = Number(h); mm = Number(mm || 0);
+    if (h > 23 || mm > 59) return null;
+    const ap = mer(x) || (h <= 12 ? other : null);
+    if (ap) return (h % 12 + (ap === 'pm' ? 12 : 0)) * 60 + mm;
+    if (h >= 13 || h === 0) return h * 60 + mm;
+    return (h === 12 ? 12 : h < 7 ? h + 12 : h) * 60 + mm;
+  };
+  let end = hours(b, null);
+  let start = hours(a, mer(b[2]) && !mer(a[2]) ? mer(b[2]) : null);
+  if (start == null || end == null) return null;
+  if (!mer(a[2]) && mer(b[2]) && start > end) start -= 12 * 60; // "11 - 1pm": 11 in the morning
+  if (end <= start && !mer(b[2]) && end + 12 * 60 > start && end + 12 * 60 < 24 * 60) end += 12 * 60;
+  if (start < 0 || end <= start) return null;
+  return { title: title.slice(0, 200), start: fromMin(start), end: fromMin(Math.min(end, 23 * 60 + 59)) };
+}
+
+async function saveDay(day, blocks) {
+  const sorted = [...blocks].sort((x, y) => toMin(x.start) - toMin(y.start));
+  state.schedule = { ...state.schedule, [day]: sorted };
+  if (!sorted.length) delete state.schedule[day];
+  render();
+  try { await api('POST', '/api/schedule', { day, blocks: sorted }); }
+  catch (err) { toast(err.message); }
+}
+const schedDay = () => (state.view.type === 'schedule' && /^\d{4}-\d{2}-\d{2}$/.test(state.view.id || '') ? state.view.id : today());
+const newBlockId = () => Math.random().toString(36).slice(2, 10);
+
+function addBlocks() {
+  const input = $('#sched-input');
+  const lines = input.value.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return;
+  const parsed = lines.map(parseBlock);
+  const bad = lines.filter((_, i) => !parsed[i]);
+  const good = parsed.filter(Boolean);
+  if (!good.length) return toast('Add a time range, like “go outside 3:05 - 4:03”');
+  const day = schedDay();
+  saveDay(day, [...dayBlocks(day), ...good.map((g) => ({ id: newBlockId(), ...g }))]);
+  toast(good.length === 1 ? `Added “${good[0].title}” · ${blockSpan(good[0])}` : `Added ${good.length} blocks`);
+  requestAnimationFrame(() => {
+    const box = $('#sched-input');
+    if (!box) return;
+    box.value = bad.join('\n'); // anything that didn't read stays in the box to fix
+    if (bad.length) toast(`Couldn't read: ${bad[0]}`);
+    updateSchedPreview();
+    box.focus();
+  });
+}
+
+// Live preview under the box of how each line will be read.
+function updateSchedPreview() {
+  const box = $('#sched-input');
+  const out = $('#sched-preview');
+  if (!box || !out) return;
+  box.style.height = 'auto';
+  box.style.height = `${box.scrollHeight}px`;
+  const lines = box.value.split('\n').map((l) => l.trim()).filter(Boolean);
+  out.innerHTML = lines.map((l) => {
+    const b = parseBlock(l);
+    return b ? `<span class="sp ok">${ic('clock')}<b>${esc(b.title)}</b> ${esc(blockSpan(b))}</span>`
+      : `<span class="sp bad">${ic('warn')}${esc(l.slice(0, 40))} · needs a time like 3:05 - 4:03</span>`;
+  }).join('');
+}
+
+// Side-by-side lanes for blocks that overlap.
+function laneBlocks(blocks) {
+  const out = [];
+  let cluster = [];
+  let clusterEnd = -1;
+  const flush = () => {
+    const lanes = [];
+    cluster.forEach((b) => {
+      let i = lanes.findIndex((end) => end <= toMin(b.start));
+      if (i < 0) { i = lanes.length; lanes.push(0); }
+      lanes[i] = toMin(b.end);
+      out.push({ b, lane: i });
+    });
+    out.slice(-cluster.length).forEach((x) => (x.lanes = lanes.length));
+    cluster = [];
+  };
+  [...blocks].sort((x, y) => toMin(x.start) - toMin(y.start)).forEach((b) => {
+    if (cluster.length && toMin(b.start) >= clusterEnd) flush();
+    cluster.push(b);
+    clusterEnd = Math.max(clusterEnd, toMin(b.end));
+  });
+  if (cluster.length) flush();
+  return out;
+}
+
+const HOUR_PX = 64;
+function scheduleHtml(day) {
+  const blocks = dayBlocks(day);
+  const isToday = day === today();
+  const now = nowMin();
+  const first = Math.min(8, ...blocks.map((b) => Math.floor(toMin(b.start) / 60)), isToday ? Math.floor(now / 60) : 24);
+  const last = Math.max(22, ...blocks.map((b) => Math.ceil(toMin(b.end) / 60)), isToday ? Math.ceil(now / 60) : 0);
+  const top = (min) => ((min - first * 60) / 60) * HOUR_PX;
+  const hours = Array.from({ length: last - first + 1 }, (_, i) => first + i);
+  const planned = blocks.reduce((n, b) => n + toMin(b.end) - toMin(b.start), 0);
+  return `<div class="sched">
+    <div class="sched-add glass">
+      <textarea id="sched-input" rows="1" placeholder="go outside 3:05 - 4:03   (one per line, paste a whole list)"></textarea>
+      <button class="btn primary sm" data-act="sched-add">${ic('plus')} Add</button>
+    </div>
+    <div class="sched-preview" id="sched-preview"></div>
+    ${blocks.length ? `<div class="sched-sum muted small">${blocks.length} block${blocks.length === 1 ? '' : 's'} · ${lengthText(planned)} planned</div>` : ''}
+    <div class="sched-grid" style="height:${(last - first) * HOUR_PX}px" data-first="${first}" data-day="${day}">
+      ${hours.map((h) => `<div class="sched-hour" style="top:${top(h * 60)}px"><span>${h < 24 ? esc(fmtTime(fromMin(h * 60)).replace(':00', '')) : ''}</span></div>`).join('')}
+      ${laneBlocks(blocks).map(({ b, lane, lanes }) => {
+        const s = toMin(b.start); const e = toMin(b.end);
+        const when = b.done ? 'done' : isToday && now >= e ? 'past' : isToday && now >= s ? 'now' : '';
+        const h = Math.max(26, top(e) - top(s) - 3);
+        return `<div class="sblock ${when} ${h < 44 ? 'short' : ''}" data-block="${esc(b.id)}" data-day="${day}"
+          style="top:${top(s) + 1}px;height:${h}px;left:calc(${(lane / lanes) * 100}% + 56px - ${(lane / lanes) * 56}px);width:calc(${100 / lanes}% - ${56 / lanes}px - 4px)">
+          <div class="sb-title">${b.done ? ic('check') : ''}${esc(b.title)}</div>
+          <div class="sb-time">${esc(blockSpan(b))} · ${lengthText(e - s)}</div>
+        </div>`;
+      }).join('')}
+      ${isToday ? `<div class="sched-now" style="top:${top(now)}px"></div>` : ''}
+      ${blocks.length ? '' : `<div class="sched-empty muted">Nothing planned${isToday ? ' today' : ''}. Type something like “go outside 3:05 - 4:03” above, or click a time.</div>`}
+    </div>
+  </div>`;
+}
+
+// Clicking an empty spot on the timeline starts a block at that time (rounded to 15 minutes).
+function startBlockAt(grid, y) {
+  const first = Number(grid.dataset.first);
+  const min = Math.max(0, Math.min(23 * 60, Math.round(((y - grid.getBoundingClientRect().top) / HOUR_PX * 60 + first * 60) / 15) * 15));
+  const box = $('#sched-input');
+  box.value = ` ${fmtTime(fromMin(min)).replace(/\s/g, '').toLowerCase()} - ${fmtTime(fromMin(Math.min(min + 60, 23 * 60 + 59))).replace(/\s/g, '').toLowerCase()}`;
+  updateSchedPreview();
+  box.focus();
+  box.setSelectionRange(0, 0);
+  box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+async function editBlock(day, id) {
+  const b = dayBlocks(day).find((x) => x.id === id);
+  if (!b) return;
+  const text = await askText('Edit block', { value: `${b.title} ${fmtTime(b.start).replace(/\s/g, '').toLowerCase()} - ${fmtTime(b.end).replace(/\s/g, '').toLowerCase()}`, ok: 'Save' });
+  if (text == null || !text.trim()) return;
+  const p = parseBlock(text);
+  if (!p) return toast('Add a time range, like “go outside 3:05 - 4:03”');
+  saveDay(day, dayBlocks(day).map((x) => (x.id === id ? { ...x, ...p } : x)));
+}
+
+function openBlockMenu(el, x, y) {
+  const day = el.dataset.day;
+  const b = dayBlocks(day).find((n) => n.id === el.dataset.block);
+  if (!b) return;
+  closeDropdown();
+  closeTaskMenu();
+  const next = ymd(addDays(parseDay(day), 1));
+  const items = [
+    ['pencil', 'Edit', () => editBlock(day, b.id)],
+    ['check', b.done ? 'Mark not done' : 'Mark done', () => saveDay(day, dayBlocks(day).map((n) => (n.id === b.id ? { ...n, done: !n.done } : n)))],
+    ['timer', 'Focus timer', () => { startTimer(); }],
+    ['duplicate', 'Copy to tomorrow', () => {
+      state.schedule = { ...state.schedule, [next]: [...dayBlocks(next), { ...b, id: newBlockId(), done: false }] };
+      saveDay(next, dayBlocks(next));
+      toast(`Copied to ${dayLabel(next)}`);
+    }],
+    '-',
+    ['trash', 'Delete', () => saveDay(day, dayBlocks(day).filter((n) => n.id !== b.id)), 'danger'],
+  ];
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu ctx-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = items.map((it) => menuItem(items, it)).join('');
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const opt = e.target.closest('[data-i]');
+    if (!opt) return;
+    closeTaskMenu();
+    items[opt.dataset.i][2]();
+  });
+  showMenu(menu, x, y);
+  el.classList.add('menu-on');
+}
+
+// Opening a day's schedule shows the current time (today) or the first block, not 8 AM.
+let schedScrolled = '';
+function scrollScheduleToNow() {
+  const grid = $('.sched-grid');
+  if (!grid) { schedScrolled = ''; return; }
+  if (schedScrolled === grid.dataset.day) return;
+  schedScrolled = grid.dataset.day;
+  const target = $('.sched-now', grid) || $('.sblock', grid);
+  if (!target) return;
+  const view = $('#view');
+  view.scrollTop = Math.max(0, target.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop - view.clientHeight / 3);
+}
+
+// On Today: what's on now, or what's next.
+function scheduleBanner() {
+  const now = nowMin();
+  const blocks = dayBlocks(today()).filter((b) => !b.done);
+  const cur = blocks.find((b) => toMin(b.start) <= now && now < toMin(b.end));
+  if (cur) return `<div class="banner sched-banner now" data-nav="schedule">${ic('clock')} Now: <b>${esc(cur.title)}</b> · until ${esc(fmtTime(cur.end))} <span class="spacer"></span> Schedule →</div>`;
+  const next = blocks.find((b) => toMin(b.start) > now);
+  if (next) return `<div class="banner sched-banner" data-nav="schedule">${ic('clock')} Next: <b>${esc(next.title)}</b> at ${esc(fmtTime(next.start))} · in ${lengthText(toMin(next.start) - now)} <span class="spacer"></span> Schedule →</div>`;
+  return '';
+}
+
+// Keep the now line and the current block moving while the schedule is open.
+setInterval(() => {
+  const grid = $('.sched-grid');
+  if (!grid || grid.dataset.day !== today()) return;
+  const first = Number(grid.dataset.first);
+  const now = nowMin();
+  const line = $('.sched-now', grid);
+  if (line) line.style.top = `${((now - first * 60) / 60) * HOUR_PX}px`;
+  $$('.sblock', grid).forEach((el) => {
+    const b = dayBlocks(today()).find((x) => x.id === el.dataset.block);
+    if (!b || b.done) return;
+    el.classList.toggle('past', now >= toMin(b.end));
+    el.classList.toggle('now', now >= toMin(b.start) && now < toMin(b.end));
+  });
+}, 30000);
+
+document.addEventListener('input', (e) => { if (e.target.id === 'sched-input') updateSchedPreview(); });
+document.addEventListener('keydown', (e) => {
+  if (e.target.id === 'sched-input' && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addBlocks(); }
+});
+
 // ---------- focus view ----------
 // What to work on next: overdue and today's tasks, deadlines closing in, and high priorities, best first.
 function focusScore(t) {
@@ -1472,6 +1728,7 @@ function renderView() {
     // Tasks whose deadline has arrived but that aren't scheduled for today.
     const dlToday = open.filter((x) => deadlineDay(x) && deadlineDay(x) <= t && !(dueDay(x) && dueDay(x) <= t));
     const dlSoon = open.filter((x) => deadlineDay(x) && deadlineDay(x) > t && deadlineDay(x) <= inDays(3));
+    html += scheduleBanner();
     if (dlSoon.length) {
       html += `<div class="banner" data-nav="deadlines">${ic('flag')} ${dlSoon.length} deadline${dlSoon.length === 1 ? '' : 's'} in the next 3 days <span class="spacer"></span> View →</div>`;
     }
@@ -1594,6 +1851,15 @@ function renderView() {
           <div class="s-sub">${task ? '↳ ' + esc(plain(task.content)) : new Date(d.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</div>
         </div>`;
       }).join('')}</div>`;
+  } else if (v.type === 'schedule') {
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(v.id || '') ? v.id : t;
+    title = 'Schedule';
+    sub = day === t ? `Today · ${parseDay(day).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}` : `${dayLabel(day)} · ${parseDay(day).toLocaleDateString([], { month: 'long', day: 'numeric' })}`;
+    actions = `<div class="seg sched-days">
+      <button data-act="sched-day" data-day="${ymd(addDays(parseDay(day), -1))}" title="Previous day">${ic('back')}</button>
+      <button data-act="sched-day" data-day="${t}" class="${day === t ? 'on' : ''}">Today</button>
+      <button data-act="sched-day" data-day="${ymd(addDays(parseDay(day), 1))}" title="Next day">${ic('arrow')}</button></div>`;
+    html = scheduleHtml(day);
   } else if (v.type === 'completed') {
     title = 'Completed';
     sub = 'Last 7 days';
@@ -1613,6 +1879,7 @@ function renderView() {
   $('#head-actions').innerHTML = actions;
   viewEl.innerHTML = html;
   layoutBoard();
+  scrollScheduleToNow();
   state.baseTitle = `${title} · Capri`;
   renderRing();
   renderTimer();
@@ -3049,6 +3316,8 @@ document.addEventListener('click', (e) => {
     if (a === 'h-deadline') return openDetail(target, '#d-deadline');
     if (a === 'h-sketch') return openDraw({ taskId: target });
     if (a === 'h-timer') return startTimer(target);
+    if (a === 'sched-day') return setView({ type: 'schedule', id: act.dataset.day === t0() ? undefined : act.dataset.day });
+    if (a === 'sched-add') return addBlocks();
     if (a === 'fc-toggle') return timer.running ? pauseTimer() : startTimer();
     if (a === 'fc-switch') return switchTimer();
     if (a === 'fc-reset') return resetTimer();
@@ -3065,6 +3334,10 @@ document.addEventListener('click', (e) => {
       return setDueDate(t.id, ymd(addDays(parseDay(deadlineDay(t)), -1)));
     }
   }
+  const block = e.target.closest('.sblock[data-block]');
+  if (block) return editBlock(block.dataset.day, block.dataset.block);
+  const slot = e.target.closest('.sched-grid');
+  if (slot) return startBlockAt(slot, e.clientY);
   const sketch = e.target.closest('[data-sketch]');
   if (sketch) return openNoteItem(state.drawings.find((d) => d.id === sketch.dataset.sketch));
 
@@ -3485,7 +3758,7 @@ function arrangeColumns(board) {
 // On phones, hold a column's heading or a note to open its menu (there's no right-click).
 let headHold = null;
 document.addEventListener('touchstart', (e) => {
-  const head = e.target.closest('.group-head[data-move], .group-head[data-section], .sketch[data-sketch], .thumb[data-sketch]');
+  const head = e.target.closest('.group-head[data-move], .group-head[data-section], .sketch[data-sketch], .thumb[data-sketch], .sblock[data-block]');
   if (!head || e.touches.length > 1) return;
   const t = e.touches[0];
   clearTimeout(headHold?.timer);
@@ -3493,7 +3766,8 @@ document.addEventListener('touchstart', (e) => {
     headHold = null;
     navigator.vibrate?.(10);
     swipeEndedAt = Date.now(); // the lift-off isn't a tap
-    if (head.dataset.sketch) openNoteMenu(head, t.clientX, t.clientY);
+    if (head.dataset.block) openBlockMenu(head, t.clientX, t.clientY);
+    else if (head.dataset.sketch) openNoteMenu(head, t.clientX, t.clientY);
     else if (head.dataset.move) openColumnMenu(head, t.clientX, t.clientY);
     else openSectionMenu(head.dataset.section, head, t.clientX, t.clientY);
   }, 450) };
@@ -3657,7 +3931,7 @@ document.addEventListener('keydown', (e) => {
   const sel = state.selectedId;
   if (pendingG) {
     pendingG = false;
-    const go = { d: 'dashboard', t: 'today', u: 'upcoming', f: 'focus', b: 'board', l: 'deadlines', s: 'sketches', c: 'completed', i: 'inbox' }[e.key];
+    const go = { d: 'dashboard', t: 'today', u: 'upcoming', f: 'focus', b: 'board', l: 'deadlines', s: 'sketches', h: 'schedule', c: 'completed', i: 'inbox' }[e.key];
     if (go) { e.preventDefault(); return go === 'inbox' ? setView({ type: 'project', id: inbox()?.id }) : setView({ type: go }); }
   }
   const keys = {
