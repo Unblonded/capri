@@ -400,6 +400,7 @@ app.post('/api/drawings', requireToken, express.json({ limit: '25mb' }), (req, r
   if (drawing) {
     Object.assign(drawing, { title: title || drawing.title, task_id: task_id || null, updated_at: now });
   } else {
+    if (list.length >= 1000) return res.status(400).json({ error: 'You have 1000 notes. Delete some to make room.' });
     drawing = { id: crypto.randomBytes(8).toString('hex'), title: title || (written ? 'Untitled note' : 'Untitled sketch'), task_id: task_id || null, created_at: now, updated_at: now };
     list.unshift(drawing);
   }
