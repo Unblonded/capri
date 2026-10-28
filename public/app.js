@@ -29,6 +29,7 @@ const ICONS = {
   comment: '<path d="M20.5 12a8.5 8.5 0 0 1-12.4 7.5L3.5 21l1.4-4.4A8.5 8.5 0 1 1 20.5 12z"/>',
   subtask: '<path d="M6 3v11a3 3 0 0 0 3 3h10"/><path d="M15.5 13.5L19 17l-3.5 3.5"/>',
   inbox: '<path d="M3 13l2.6-8.2A2.5 2.5 0 0 1 8 3h8a2.5 2.5 0 0 1 2.4 1.8L21 13v5a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z"/><path d="M3 13h5l1.5 3h5l1.5-3h5"/>',
+  board: '<rect x="3" y="3.5" width="5" height="17" rx="1.8"/><rect x="9.5" y="3.5" width="5" height="11" rx="1.8"/><rect x="16" y="3.5" width="5" height="14" rx="1.8"/>',
   grid: '<rect x="3" y="3" width="7.5" height="7.5" rx="2.2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2.2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2.2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2.2"/>',
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   done: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/>',
@@ -529,6 +530,8 @@ document.addEventListener('pointermove', (e) => {
     // Mostly vertical: it's a scroll, let it be.
     if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; }
     if (Math.abs(dx) < 10) return;
+    // On a board, sideways means scrolling the columns (a long press picks the card up instead).
+    if (swipe.row.closest('.board')) { swipe = null; return; }
     swipe.active = true;
     swipe.row.classList.add('swiping');
   }
@@ -1015,6 +1018,7 @@ function renderSidebar() {
     navItem({ type: 'upcoming', ico: 'calendar', name: 'Upcoming', count: upcoming }),
     navItem({ type: 'deadlines', ico: 'flag', name: 'Deadlines', count: dlSoon.length, alert: dlOverdue }),
     navItem({ type: 'focus', ico: 'star', name: 'Focus (P1 & P2)', count: focus }),
+    navItem({ type: 'board', ico: 'board', name: 'Board' }),
     navItem({ type: 'sketches', ico: 'pencil', name: 'Sketches', count: state.drawings.length }),
     navItem({ type: 'completed', ico: 'done', name: 'Completed' }),
   ].filter(Boolean).join('');
@@ -1097,6 +1101,99 @@ function sortControl() {
     `<option value="${k}" ${state.sort === k ? 'selected' : ''}>Sort: ${v}</option>`).join('')}</select>`;
 }
 
+// ---------- board ----------
+// A board is columns from one grouping. Each column knows which cards belong in it, what dropping a
+// card on it changes, and what a task added at its foot starts with.
+const BOARD_GROUPS = { section: 'Section', due: 'Do date', priority: 'Priority', project: 'Project', label: 'Label' };
+const boardKey = () => (state.view.type === 'board' ? 'board' : 'board:' + state.view.id);
+const boardGroup = (choices) => { const g = store.get(boardKey() + ':group', choices[0]); return choices.includes(g) ? g : choices[0]; };
+
+function groupControl(choices, current) {
+  return `<select id="group-select" class="btn sm" title="Group columns by">${choices.map((k) =>
+    `<option value="${k}" ${current === k ? 'selected' : ''}>Columns: ${BOARD_GROUPS[k]}</option>`).join('')}</select>`;
+}
+
+function boardColumns(tasks, by, project) {
+  const base = project ? { project_id: project.id } : {};
+  const t = today();
+  const cols = [];
+  const col = (key, name, test, { drop = null, add = base, sub = '', cls = '', keep = true } = {}) =>
+    cols.push({ key, name, items: tasks.filter(test), drop, add, sub, cls, keep });
+  if (by === 'section') {
+    const sections = state.sections.filter((s) => s.project_id === project.id && !s.is_archived).sort((a, b) => a.section_order - b.section_order);
+    col('none', project.inbox_project ? 'Inbox' : 'No section', (x) => !x.section_id,
+      { drop: { section: '', project: project.id }, keep: !sections.length });
+    for (const s of sections) col(s.id, s.name, (x) => x.section_id === s.id,
+      { drop: { section: s.id, project: project.id }, add: { project_id: project.id, section_id: s.id } });
+  } else if (by === 'due') {
+    col('overdue', 'Overdue', (x) => dueDay(x) && dueDay(x) < t, { cls: 'overdue', keep: false });
+    for (let i = 0; i < 7; i++) {
+      const day = inDays(i);
+      col(day, i < 2 ? dayLabel(day) : parseDay(day).toLocaleDateString([], { weekday: 'long' }), (x) => dueDay(x) === day, {
+        drop: { due: day }, add: { ...base, due: day }, cls: i ? '' : 'today',
+        sub: parseDay(day).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+      });
+    }
+    col('later', 'Later', (x) => dueDay(x) && dueDay(x) > inDays(6), { keep: false });
+    col('nodate', 'No date', (x) => !dueDay(x), { drop: { due: '' } });
+  } else if (by === 'priority') {
+    for (const [p, name] of [[4, 'Priority 1'], [3, 'Priority 2'], [2, 'Priority 3'], [1, 'No priority']])
+      col('p' + p, name, (x) => x.priority === p, { drop: { priority: p }, add: { ...base, priority: p }, cls: prioClass(p) });
+  } else if (by === 'project') {
+    for (const p of [inbox(), ...orderedProjects()].filter(Boolean))
+      col(p.id, projectName(p), (x) => x.project_id === p.id, { drop: { project: p.id }, add: { project_id: p.id }, keep: false });
+  } else if (by === 'label') {
+    // A card with several labels sits under its first one, so each task appears once.
+    const names = [...state.labels].sort((a, b) => a.item_order - b.item_order).map((l) => l.name);
+    const first = (x) => names.find((n) => x.labels?.includes(n)) || x.labels?.[0] || null;
+    col('nolabel', 'No label', (x) => !first(x), { drop: { label: '' } });
+    for (const n of names) col('l:' + n, '@' + n, (x) => first(x) === n, { drop: { label: n }, add: { ...base, label: n } });
+  }
+  return cols.filter((c) => c.keep || c.items.length);
+}
+
+function renderBoard(tasks, by, project) {
+  const cols = boardColumns(tasks, by, project);
+  const showProject = !project && by !== 'project';
+  return `<div class="board" data-by="${by}">${cols.map((c) => {
+    // Subtasks get their own card unless their parent is in the same column (the parent shows n/m).
+    const ids = new Set(c.items.map((x) => x.id));
+    const cards = sortTasks(c.items.filter((x) => !ids.has(x.parent_id)));
+    return `<div class="column glass ${c.drop ? '' : 'no-drop'}" data-col="${esc(c.key)}" ${c.drop ? `data-drop='${esc(JSON.stringify(c.drop))}'` : ''}>
+      <div class="group-head ${c.cls}">${esc(c.name)} <span class="muted">${c.sub ? esc(c.sub) + ' · ' : ''}${cards.length}</span></div>
+      <div class="col-body">${cards.map((x) => taskRow(x, { showProject })).join('') || '<div class="col-empty">Drop tasks here</div>'}</div>
+      ${c.drop ? inlineAdd(c.add) : ''}
+    </div>`;
+  }).join('')}${by === 'section' ? `<button class="column add-col" data-act="add-section">${ic('plus')} Add section</button>` : ''}</div>`;
+}
+
+// What dropping a card on a column changes, read from the column's data-drop.
+function dropOnColumn(id, column) {
+  const t = taskById(id);
+  const drop = column.dataset.drop && JSON.parse(column.dataset.drop);
+  if (!t || !drop) return;
+  if ('section' in drop) {
+    if ((t.section_id || '') !== drop.section || t.project_id !== drop.project) moveTask(id, drop.project, drop.section || null);
+  } else if ('project' in drop) {
+    if (t.project_id !== drop.project) { moveTask(id, drop.project, null); toast(`Moved to ${projectName(projectById(drop.project))}`); }
+  } else if ('due' in drop) {
+    if ((dueDay(t) || '') === drop.due) return;
+    // Show it in the new column straight away; a repeating task asks first, so it waits.
+    if (!t.due?.is_recurring) { patchLocal(id, { due: drop.due ? { date: drop.due, string: dayLabel(drop.due), is_recurring: false } : null }); renderAnimated(); }
+    setDueDate(id, drop.due || null);
+  } else if ('priority' in drop) {
+    if (t.priority !== drop.priority) setPriority(id, drop.priority);
+  } else if ('label' in drop) {
+    // Swap the label it was filed under for the new one (other labels stay); "No label" clears them.
+    const from = $(`.task[data-task="${id}"]`)?.closest('.column')?.dataset.col;
+    const old = from?.startsWith('l:') ? from.slice(2) : null;
+    if (old === drop.label || (!old && !drop.label)) return;
+    patchLocal(id, { labels: drop.label ? [...new Set([...(t.labels || []).filter((l) => l !== old), drop.label])] : [] });
+    renderAnimated();
+    updateTask(id, { labels: taskById(id).labels }, { rerender: false });
+  }
+}
+
 function renderRing() {
   const ring = $('#ring');
   const left = openTasks().filter((x) => dueDay(x) && dueDay(x) <= today()).length;
@@ -1117,7 +1214,7 @@ function renderRing() {
 function renderView() {
   const v = state.view;
   const viewEl = $('#view');
-  viewEl.classList.remove('wide');
+  viewEl.classList.remove('wide', 'board-view');
   let title = '', sub = '', html = '', actions = sortControl();
   const open = openTasks();
   const t = today();
@@ -1198,15 +1295,10 @@ function renderView() {
       const sections = state.sections.filter((s) => s.project_id === p.id && !s.is_archived).sort((a, b) => a.section_order - b.section_order);
       const buckets = [{ id: null, name: p.inbox_project ? 'Inbox' : 'No section' }, ...sections];
       if (layout === 'board') {
-        viewEl.classList.add('wide');
-        html = `<div class="board">${buckets.map((s) => {
-          const items = tasks.filter((x) => (x.section_id || null) === s.id && !x.parent_id);
-          return `<div class="column glass" data-section="${s.id || ''}" data-project="${p.id}">
-            <div class="group-head">${esc(s.name)} <span class="muted">${items.length}</span></div>
-            <div class="col-body">${sortTasks(items).map((x) => taskRow(x, { showProject: false })).join('')}</div>
-            ${inlineAdd({ project_id: p.id, section_id: s.id })}
-          </div>`;
-        }).join('')}</div>`;
+        viewEl.classList.add('wide', 'board-view');
+        const by = boardGroup(['section', 'due', 'priority', 'label']);
+        actions = actions.replace('<div class="seg">', groupControl(['section', 'due', 'priority', 'label'], by) + '<div class="seg">');
+        html = renderBoard(tasks, by, p);
       } else {
         html = buckets.map((s) => {
           const items = tasks.filter((x) => (x.section_id || null) === s.id);
@@ -1216,6 +1308,13 @@ function renderView() {
         }).join('');
       }
     }
+  } else if (v.type === 'board') {
+    title = 'Board';
+    sub = `${open.length} open task${open.length === 1 ? '' : 's'} across every project`;
+    viewEl.classList.add('wide', 'board-view');
+    const by = boardGroup(['due', 'priority', 'project', 'label']);
+    actions = groupControl(['due', 'priority', 'project', 'label'], by) + sortControl();
+    html = renderBoard(open, by, null);
   } else if (v.type === 'label') {
     title = '@' + v.id;
     const items = open.filter((x) => x.labels?.includes(v.id));
@@ -1543,7 +1642,7 @@ async function setDeadline(id, date) {
 async function moveTask(id, project_id, section_id) {
   const body = section_id ? { section_id } : { project_id };
   patchLocal(id, { project_id, section_id: section_id || null });
-  render();
+  renderAnimated();
   try { await api('POST', `/api/tasks/${id}/move`, body); }
   catch (err) { toast(err.message); sync({ quiet: true }); }
 }
@@ -1781,6 +1880,8 @@ async function saveQuick() {
     let task = await api('POST', '/api/tasks/quick', { text });
     const fix = {};
     if (description) fix.description = description;
+    if (ctx.priority && task.priority === 1) fix.priority = ctx.priority;
+    if (ctx.label && !task.labels?.includes(ctx.label)) fix.labels = [...(task.labels || []), ctx.label];
     if (date?.time) fix.due_datetime = new Date(`${date.date}T${date.time}:00`).toISOString();
     else if (date) fix.due_date = date.date;
     else if (dueDate && !task.due) fix.due_date = dueDate;
@@ -1835,6 +1936,7 @@ function renderPalette() {
     { label: 'New sketch', run: () => openDraw({}) },
     { label: 'Start focus timer', run: () => startTimer() },
     { label: 'Go to Dashboard', run: () => setView({ type: 'dashboard' }) },
+    { label: 'Go to Board', run: () => setView({ type: 'board' }) },
     { label: 'Go to Today', run: () => setView({ type: 'today' }) },
     { label: 'Go to Upcoming', run: () => setView({ type: 'upcoming' }) },
     { label: 'Go to Deadlines', run: () => setView({ type: 'deadlines' }) },
@@ -2520,6 +2622,7 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  if (e.target.id === 'group-select') { store.set(boardKey() + ':group', e.target.value); return renderAnimated(); }
   if (e.target.id === 'sort-select') { state.sort = e.target.value; store.set('sort', state.sort); return renderAnimated(); }
   if (e.target.id === 'bulk-prio') { const v = Number(e.target.value); e.target.value = ''; return v && runBulk('priority', v); }
   if (e.target.id === 'quick-due' || e.target.id === 'quick-deadline') { syncDateFields($('#quick')); return updateQuickPreview(); }
@@ -2550,8 +2653,8 @@ document.addEventListener('submit', async (e) => {
   } catch (err) { toast(err.message); }
 });
 
-// Drag & drop: board columns move sections, day groups reschedule, sidebar projects move, "Today" schedules.
-const dropTargetOf = (el) => el.closest('.column, .group[data-due], .nav-item[data-nav="project"], .nav-item[data-nav="today"]');
+// Drag & drop: board columns change whatever they group by (section, date, priority, project, label), day groups reschedule, sidebar projects move, "Today" schedules.
+const dropTargetOf = (el) => el.closest('.column[data-drop], .group[data-due], .nav-item[data-nav="project"], .nav-item[data-nav="today"]');
 
 document.addEventListener('dragstart', (e) => {
   const row = e.target.closest('[data-task]');
@@ -2580,8 +2683,7 @@ document.addEventListener('drop', (e) => {
   const t = taskById(id);
   if (!t) return;
   if (target.classList.contains('column')) {
-    const sid = target.dataset.section || null;
-    if ((t.section_id || null) !== sid) moveTask(id, target.dataset.project, sid);
+    dropOnColumn(id, target);
   } else if (target.dataset.due) {
     if (dueDay(t) !== target.dataset.due) setDueDate(id, target.dataset.due);
   } else if (target.dataset.nav === 'today') {
@@ -2591,6 +2693,93 @@ document.addEventListener('drop', (e) => {
     toast(`Moved to ${projectName(projectById(target.dataset.id))}`);
   }
 });
+
+// Touch: hold a board card for a moment to pick it up, drag it onto another column and let go.
+// Dragging near the edges scrolls the board.
+const HOLD_MS = 380;
+let hold = null;
+document.addEventListener('touchstart', (e) => {
+  const row = e.target.closest('.board .task[data-task]');
+  if (!row || hold || e.touches.length > 1 || e.target.closest('button, a')) return;
+  row.draggable = false; // keep iOS's own drag-and-drop out of it
+  const p = e.touches[0];
+  hold = { row, x: p.clientX, y: p.clientY, cx: p.clientX, cy: p.clientY, timer: setTimeout(liftCard, HOLD_MS) };
+}, { passive: true });
+
+function liftCard() {
+  const { row } = hold;
+  const r = row.getBoundingClientRect();
+  const ghost = row.cloneNode(true);
+  ghost.classList.remove('selected');
+  ghost.classList.add('card-ghost');
+  Object.assign(ghost.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px` });
+  document.body.append(ghost);
+  row.classList.add('dragging');
+  hold.ghost = ghost;
+  hold.home = row.closest('.column');
+  navigator.vibrate?.(10);
+  const view = $('#view');
+  view.classList.add('carrying'); // snapping would pull every edge-scroll straight back
+  const step = () => {
+    if (!hold?.ghost) return;
+    const v = view.getBoundingClientRect();
+    const edge = (pos, lo, hi) => (pos < lo + 48 ? -1 : pos > hi - 48 ? 1 : 0) * 14;
+    view.scrollLeft += edge(hold.cx, v.left, v.right);
+    view.scrollTop += edge(hold.cy, v.top, v.bottom);
+    pickColumn();
+    hold.raf = requestAnimationFrame(step);
+  };
+  hold.raf = requestAnimationFrame(step);
+}
+
+function pickColumn() {
+  const col = document.elementFromPoint(hold.cx, hold.cy)?.closest('.column[data-drop]');
+  hold.col = col && col !== hold.home ? col : null;
+  $$('.column.drop-target').forEach((c) => c !== hold.col && c.classList.remove('drop-target'));
+  hold.col?.classList.add('drop-target');
+}
+
+document.addEventListener('touchmove', (e) => {
+  if (!hold) return;
+  const p = e.touches[0];
+  hold.cx = p.clientX;
+  hold.cy = p.clientY;
+  if (!hold.ghost) {
+    // Moved before the hold finished: it's a scroll.
+    if (Math.hypot(p.clientX - hold.x, p.clientY - hold.y) > 8) endHold();
+    return;
+  }
+  e.preventDefault();
+  hold.ghost.style.transform = `translate(${p.clientX - hold.x}px, ${p.clientY - hold.y}px) rotate(1.5deg) scale(1.03)`;
+}, { passive: false });
+
+function endHold(drop = false) {
+  if (!hold) return;
+  const { row, ghost, col, timer, raf } = hold;
+  hold = null;
+  clearTimeout(timer);
+  cancelAnimationFrame(raf);
+  row.draggable = true;
+  $$('.column.drop-target').forEach((c) => c.classList.remove('drop-target'));
+  if (!ghost) return;
+  $('#view').classList.remove('carrying');
+  swipeEndedAt = Date.now(); // the lift-off isn't a tap on the card
+  row.classList.remove('dragging');
+  if (drop && col) {
+    // Start the card from where it was let go, so it glides from the finger into its new column.
+    const g = ghost.getBoundingClientRect();
+    const r = row.getBoundingClientRect();
+    row.style.transform = `translate(${g.left - r.left}px, ${g.top - r.top}px)`;
+    ghost.remove();
+    dropOnColumn(row.dataset.task, col);
+    if (row.isConnected) row.style.transform = '';
+  } else {
+    ghost.animate([{ opacity: 1 }, { opacity: 0, transform: 'none' }], { duration: 180, easing: 'ease-out' }).finished.then(() => ghost.remove());
+  }
+}
+document.addEventListener('touchend', () => endHold(true));
+document.addEventListener('touchcancel', () => endHold());
+document.addEventListener('contextmenu', (e) => { if (hold) { e.preventDefault(); e.stopPropagation(); } }, true);
 
 $('#quick-input').addEventListener('input', updateQuickPreview);
 $('#quick-input').addEventListener('scroll', () => { $('#quick-mirror').scrollLeft = $('#quick-input').scrollLeft; });
@@ -2666,7 +2855,7 @@ document.addEventListener('keydown', (e) => {
   const sel = state.selectedId;
   if (pendingG) {
     pendingG = false;
-    const go = { d: 'dashboard', t: 'today', u: 'upcoming', f: 'focus', l: 'deadlines', s: 'sketches', c: 'completed', i: 'inbox' }[e.key];
+    const go = { d: 'dashboard', t: 'today', u: 'upcoming', f: 'focus', b: 'board', l: 'deadlines', s: 'sketches', c: 'completed', i: 'inbox' }[e.key];
     if (go) { e.preventDefault(); return go === 'inbox' ? setView({ type: 'project', id: inbox()?.id }) : setView({ type: go }); }
   }
   const keys = {
@@ -2711,7 +2900,7 @@ async function autoSync(minGap) {
   minGap ??= document.hidden ? BACKGROUND_SYNC_MS : AUTO_SYNC_MS;
   if (Date.now() - state.lastSync < minGap) return;
   // Not mid-gesture or mid-drag, and not while your own changes are still saving.
-  if (swipe || $('.task.dragging') || writes.pending || ddOpen || datePop || ctxMenu) return;
+  if (swipe || hold || $('.task.dragging') || writes.pending || ddOpen || datePop || ctxMenu) return;
   const a = document.activeElement;
   if (a?.matches('input, textarea') && !$('#detail').contains(a)) return; // typing somewhere a redraw would clear
   autoSyncing = true;

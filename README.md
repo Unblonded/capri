@@ -96,8 +96,9 @@ The apps are ad-hoc signed, not notarised (that needs a paid Apple Developer acc
 
 ## Features
 
-- **Views:** Dashboard, Inbox, Today (with overdue + one-click "reschedule to today"), Upcoming (14 days), Focus (all P1/P2), Completed (last 7 days, with reopen), projects, labels, search
-- **Projects:** list or board layout per project, sections, drag cards between board columns, nested sub-projects and sub-tasks
+- **Views:** Dashboard, Inbox, Today (with overdue + one-click "reschedule to today"), Upcoming (14 days), Focus (all P1/P2), Board, Completed (last 7 days, with reopen), projects, labels, search
+- **Projects:** list or board layout per project, sections, nested sub-projects and sub-tasks
+- **Board:** every open task as columns, or one project's. Group columns by section, do date (overdue, today, the next six days, no date), priority, project or label. Dragging a card to another column changes that thing, and Add task at a column's foot starts with it. On a phone, hold a card to pick it up; sideways swipes scroll the board
 - **Quick add** with natural language and live inline highlighting. Dates are detected as you type, shorthand included: `tod`, `tmr`/`tmrw`, `fri`, `wed 3pm`, `next mon`, `nov 12`, `11/2`, `in 2 weeks`, `tonight`, `at noon`. The date is pulled out of the title and set as the do date; hit × on the date chip if a word wasn't meant as a date. `every …` repeats are passed to Todoist untouched
 - **Task drawer:** edit name, description, due (natural language), project/section, priority, labels, sub-tasks, comments, delete
 - **On phones:** swipe a task right to complete it, left to delete it (with a few seconds to undo); no accidental zooming when tapping fields
@@ -131,7 +132,7 @@ The apps are ad-hoc signed, not notarised (that needs a paid Apple Developer acc
 | `s` | New sketch (attached to selected task) |
 | `f` | Start focus timer on selected task |
 | `#` | Delete selected task |
-| `g` then `t` `u` `l` `f` `d` `s` `c` `i` | Today / Upcoming / Deadlines / Focus / Dashboard / Sketches / Completed / Inbox |
+| `g` then `t` `u` `l` `f` `b` `d` `s` `c` `i` | Today / Upcoming / Deadlines / Focus / Board / Dashboard / Sketches / Completed / Inbox |
 | `?` | Shortcut sheet |
 | `Esc` | Close drawer, dialog or selection |
 
