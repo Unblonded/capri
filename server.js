@@ -331,6 +331,19 @@ app.post('/api/sections', requireToken, wrap(async (req, res) => {
   res.json(await td('POST', '/sections', { auth: req.token, body: req.body }));
 }));
 
+// Labels: create, rename or recolour, delete. Only the name and colour are passed on.
+const labelBody = (b) => Object.fromEntries(Object.entries({ name: b?.name, color: b?.color }).filter(([, v]) => typeof v === 'string' && v.trim()));
+app.post('/api/labels', requireToken, wrap(async (req, res) => {
+  res.json(await td('POST', '/labels', { auth: req.token, body: labelBody(req.body) }));
+}));
+app.post('/api/labels/:id', requireToken, wrap(async (req, res) => {
+  res.json(await td('POST', `/labels/${encodeURIComponent(req.params.id)}`, { auth: req.token, body: labelBody(req.body) }));
+}));
+app.delete('/api/labels/:id', requireToken, wrap(async (req, res) => {
+  await td('DELETE', `/labels/${encodeURIComponent(req.params.id)}`, { auth: req.token });
+  res.json({ ok: true });
+}));
+
 // The REST API can't reorder sections, so this one goes through Todoist's sync endpoint.
 app.post('/api/sections/reorder', requireToken, wrap(async (req, res) => {
   const uuid = crypto.randomUUID();

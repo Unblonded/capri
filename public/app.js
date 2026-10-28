@@ -885,6 +885,8 @@ function openColumnMenu(head, x, y) {
 document.addEventListener('contextmenu', (e) => {
   const block = e.target.closest('.sblock[data-block]');
   if (block) { e.preventDefault(); return openBlockMenu(block, e.clientX, e.clientY); }
+  const lbl = e.target.closest('.nav-item[data-nav="label"]');
+  if (lbl) { e.preventDefault(); return openLabelMenu(lbl.dataset.id, e.clientX, e.clientY, lbl); }
   const note = e.target.closest('.sketch[data-sketch], .thumb[data-sketch]');
   if (note) { e.preventDefault(); return openNoteMenu(note, e.clientX, e.clientY); }
   const head = e.target.closest('.group-head[data-move], .group-head[data-section]');
@@ -1139,9 +1141,9 @@ function renderSidebar() {
     `<div style="padding-left:${projectDepth(p) * 14}px">${navItem({ type: 'project', id: p.id, dot: color(p.color), name: p.name, count: countIn(p.id) })}</div>`
   ).join('') || '<div class="muted small" style="padding:4px 10px">No projects yet</div>';
 
-  $('#nav-labels').innerHTML = [...state.labels].sort((a, b) => a.item_order - b.item_order).map((l) =>
+  $('#nav-labels').innerHTML = sortedLabels().map((l) =>
     navItem({ type: 'label', id: l.name, dot: color(l.color), name: '@' + l.name, count: open.filter((x) => x.labels?.includes(l.name)).length })
-  ).join('') || '<div class="muted small" style="padding:4px 10px">No labels</div>';
+  ).join('') || '<button class="link-btn small nav-empty" data-act="new-label">+ Make your first label</button>';
 }
 
 function taskRow(t, { showProject = true, depth = 0, focusPick = false } = {}) {
@@ -1160,7 +1162,7 @@ function taskRow(t, { showProject = true, depth = 0, focusPick = false } = {}) {
     kids.length && `<span class="mi">${ic('subtask')}${kidsDone}/${kids.length}</span>`,
     t.note_count && `<span class="mi">${ic('comment')}${t.note_count}</span>`,
     sketches && `<span class="mi">${ic('pencil')}${sketches}</span>`,
-    ...(t.labels || []).map((l) => `<span class="label">@${esc(l)}</span>`),
+    ...(t.labels || []).map((l) => `<span class="label" style="--lc:${labelColor(l)}">@${esc(l)}</span>`),
     showProject && p && `<span class="proj">${esc(projectName(p))}${section ? ' / ' + esc(section.name) : ''}<span class="dot" style="background:${color(p.color)}"></span></span>`,
   ].filter(Boolean).join('');
   const cls = [state.selectedId === t.id && 'selected', state.picked.has(t.id) && 'picked', focusPick && 'focus-row'].filter(Boolean).join(' ');
@@ -1415,6 +1417,116 @@ function renderRing() {
   ring.innerHTML = `${track}<span class="dp-text">${text}</span>`;
 }
 
+
+
+// ---------- labels ----------
+const sortedLabels = () => [...state.labels].sort((a, b) => a.item_order - b.item_order);
+const labelByName = (name) => state.labels.find((l) => l.name === name);
+const labelColor = (name) => color(labelByName(name)?.color || 'charcoal');
+
+// Labels can't hold spaces in quick add, so they're kept to one word.
+const labelName = (s) => s.trim().replace(/^@+/, '').replace(/\s+/g, '_').slice(0, 60);
+
+async function createLabel(forTask = null) {
+  const raw = await askText('New label', { placeholder: 'e.g. errands', ok: 'Create' });
+  const name = raw && labelName(raw);
+  if (!name) return;
+  if (labelByName(name)) return toast(`@${name} already exists`);
+  const used = new Set(state.labels.map((l) => l.color));
+  const pick = Object.keys(COLORS).filter((c) => !['charcoal', 'grey', 'taupe'].includes(c) && !used.has(c));
+  try {
+    const l = await api('POST', '/api/labels', { name, color: pick[Math.floor(Math.random() * pick.length)] || 'blue' });
+    state.labels.push(l);
+    const t = forTask && taskById(forTask);
+    if (t) {
+      const labels = [...(t.labels || []), l.name];
+      patchLocal(t.id, { labels });
+      updateTask(t.id, { labels });
+    }
+    render();
+    toast(t ? `Added @${l.name}` : `Created @${l.name}`);
+  } catch (err) { toast(err.message); }
+}
+
+// Swap a label's name on every task here so nothing flickers before the next sync confirms it.
+function renameLocally(from, to) {
+  state.tasks.forEach((t) => {
+    if (!t.labels?.includes(from)) return;
+    t.labels = to ? t.labels.map((x) => (x === from ? to : x)) : t.labels.filter((x) => x !== from);
+  });
+}
+
+async function renameLabel(name) {
+  const l = labelByName(name);
+  const raw = l && await askText('Rename label', { value: l.name, ok: 'Rename' });
+  const next = raw && labelName(raw);
+  if (!next || next === l.name) return;
+  if (labelByName(next)) return toast(`@${next} already exists`);
+  try {
+    await api('POST', `/api/labels/${l.id}`, { name: next });
+    renameLocally(l.name, next);
+    l.name = next;
+    if (state.view.type === 'label' && state.view.id === name) return setView({ type: 'label', id: next });
+    render();
+  } catch (err) { toast(err.message); }
+}
+
+async function recolorLabel(name, c) {
+  const l = labelByName(name);
+  if (!l || l.color === c) return;
+  const was = l.color;
+  l.color = c;
+  render();
+  try { await api('POST', `/api/labels/${l.id}`, { color: c }); }
+  catch (err) { l.color = was; render(); toast(err.message); }
+}
+
+async function deleteLabel(name) {
+  const l = labelByName(name);
+  if (!l) return;
+  const n = openTasks().filter((t) => t.labels?.includes(name)).length;
+  if (!(await askConfirm(`Delete @${name}?`, { body: n ? `It comes off ${n} task${n === 1 ? '' : 's'}; the tasks themselves stay.` : 'No open tasks use it.', ok: 'Delete', danger: true }))) return;
+  try {
+    await api('DELETE', `/api/labels/${l.id}`);
+    state.labels = state.labels.filter((x) => x.id !== l.id);
+    renameLocally(name, null);
+    if (state.view.type === 'label' && state.view.id === name) return setView({ type: 'today' });
+    render();
+    toast(`Deleted @${name}`);
+  } catch (err) { toast(err.message); }
+}
+
+function openLabelMenu(name, x, y, anchor) {
+  const l = labelByName(name);
+  if (!l) return;
+  closeDropdown();
+  closeTaskMenu();
+  const items = [
+    ['external', 'Open', () => setView({ type: 'label', id: name })],
+    ['pencil', 'Rename', () => renameLabel(name)],
+    'colors',
+    '-',
+    ['trash', 'Delete label', () => deleteLabel(name), 'danger'],
+  ];
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu ctx-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = items.map((it) => (it === 'colors'
+    ? `<div class="ctx-colors" role="group" aria-label="Colour">${Object.entries(COLORS).map(([k, hex]) =>
+      `<button class="ctx-c ${l.color === k ? 'on' : ''}" data-ctx-color="${k}" title="${k.replace(/_/g, ' ')}" style="background:${hex}"></button>`).join('')}</div>`
+    : menuItem(items, it))).join('');
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const c = e.target.closest('[data-ctx-color]');
+    const opt = e.target.closest('[data-i]');
+    if (!c && !opt) return;
+    closeTaskMenu();
+    if (c) recolorLabel(name, c.dataset.ctxColor);
+    else items[opt.dataset.i][2]();
+  });
+  showMenu(menu, x, y);
+  anchor?.classList.add('menu-on');
+}
 
 // ---------- schedule ----------
 // Time blocks for a day, typed the way you'd write them: "go outside 3:05 - 4:03", "5pm-8pm do something".
@@ -1820,6 +1932,17 @@ function renderView() {
     const by = boardGroup(['due', 'priority', 'project', 'label']);
     actions = groupControl(['due', 'priority', 'project', 'label'], by) + sortControl();
     html = renderBoard(open, by, null);
+  } else if (v.type === 'label' && labelByName(v.id)) {
+    const l = labelByName(v.id);
+    title = '@' + l.name;
+    const items = open.filter((x) => x.labels?.includes(l.name));
+    const projects = [...new Set(items.map((x) => x.project_id))].map(projectById).filter(Boolean)
+      .sort((a, b) => (b.inbox_project ? 1 : 0) - (a.inbox_project ? 1 : 0) || a.child_order - b.child_order);
+    sub = `${items.length} open task${items.length === 1 ? '' : 's'}${projects.length > 1 ? ` in ${projects.length} projects` : ''}`;
+    actions = sortControl() + `<button class="btn sm label-edit" data-act="label-menu" data-name="${esc(l.name)}"><span class="dot" style="background:${color(l.color)}"></span>Edit label</button>`;
+    html = projects.map((p) => group(projectName(p), taskTree(items.filter((x) => x.project_id === p.id)), { sub: String(items.filter((x) => x.project_id === p.id).length), key: 'lbl:' + p.id }) ).join('')
+      + (items.length ? '' : empty('tag', `Nothing tagged @${l.name} yet. Add it to a task from its details, or type @${l.name} when adding one.`))
+      + inlineAdd({ label: l.name });
   } else if (v.type === 'label') {
     title = '@' + v.id;
     const items = open.filter((x) => x.labels?.includes(v.id));
@@ -2040,8 +2163,9 @@ function renderDetail() {
     <label class="field"><span>Project</span><select id="d-project">${projOptions}</select></label>
     <div class="field"><span>Priority</span><div class="prio-pick">${[4, 3, 2, 1].map((n) =>
       `<button data-prio="${n}" class="${t.priority === n ? 'on' : ''}" style="color:var(--${prioClass(n)})">P${5 - n}</button>`).join('')}</div></div>
-    <div class="field"><span>Labels</span><div class="chips">${state.labels.map((l) =>
-      `<button class="chip ${t.labels?.includes(l.name) ? 'on' : ''}" data-label="${esc(l.name)}">@${esc(l.name)}</button>`).join('') || '<span class="muted small">No labels in your account</span>'}</div></div>
+    <div class="field"><span>Labels</span><div class="chips">${sortedLabels().map((l) =>
+      `<button class="chip label-chip ${t.labels?.includes(l.name) ? 'on' : ''}" style="--lc:${color(l.color)}" data-label="${esc(l.name)}">@${esc(l.name)}</button>`).join('')}
+      <button class="chip new-label" data-act="new-label-for">${ic('plus')} New label</button></div></div>
 
     <div class="section-title">Sub-tasks ${kids.length ? `<span class="muted">${kids.length}</span>` : ''}</div>
     <div class="subtask-list">${kids.map((k) => taskRow(k, { showProject: false })).join('')}
@@ -3367,6 +3491,9 @@ document.addEventListener('click', (e) => {
     if (a === 'h-deadline') return openDetail(target, '#d-deadline');
     if (a === 'h-sketch') return openDraw({ taskId: target });
     if (a === 'h-timer') return startTimer(target);
+    if (a === 'new-label') return createLabel();
+    if (a === 'new-label-for') return createLabel(state.detailId);
+    if (a === 'label-menu') { const r = act.getBoundingClientRect(); return openLabelMenu(act.dataset.name, r.left, r.bottom + 6, act); }
     if (a === 'sched-day') return setView({ type: 'schedule', id: act.dataset.day === t0() ? undefined : act.dataset.day });
     if (a === 'sched-add') return addBlocks();
     if (a === 'fc-toggle') return timer.running ? pauseTimer() : startTimer();
@@ -3809,7 +3936,7 @@ function arrangeColumns(board) {
 // On phones, hold a column's heading or a note to open its menu (there's no right-click).
 let headHold = null;
 document.addEventListener('touchstart', (e) => {
-  const head = e.target.closest('.group-head[data-move], .group-head[data-section], .sketch[data-sketch], .thumb[data-sketch], .sblock[data-block]');
+  const head = e.target.closest('.group-head[data-move], .group-head[data-section], .sketch[data-sketch], .thumb[data-sketch], .sblock[data-block], .nav-item[data-nav="label"]');
   if (!head || e.touches.length > 1) return;
   const t = e.touches[0];
   clearTimeout(headHold?.timer);
@@ -3817,7 +3944,8 @@ document.addEventListener('touchstart', (e) => {
     headHold = null;
     navigator.vibrate?.(10);
     swipeEndedAt = Date.now(); // the lift-off isn't a tap
-    if (head.dataset.block) openBlockMenu(head, t.clientX, t.clientY);
+    if (head.dataset.nav === 'label') openLabelMenu(head.dataset.id, t.clientX, t.clientY, head);
+    else if (head.dataset.block) openBlockMenu(head, t.clientX, t.clientY);
     else if (head.dataset.sketch) openNoteMenu(head, t.clientX, t.clientY);
     else if (head.dataset.move) openColumnMenu(head, t.clientX, t.clientY);
     else openSectionMenu(head.dataset.section, head, t.clientX, t.clientY);
@@ -3927,6 +4055,7 @@ $('#help-btn').addEventListener('click', () => $('#help').classList.remove('hidd
 $('#theme-btn').addEventListener('click', toggleTheme);
 $('#refresh-btn').addEventListener('click', () => sync());
 $('#add-project').addEventListener('click', createProject);
+$('#add-label').addEventListener('click', () => createLabel());
 $('#menu-btn').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
 // Phone: tapping anywhere outside the sidebar, or picking something in it, closes it.
 $('#sidebar-scrim').addEventListener('click', () => $('#sidebar').classList.remove('open'));

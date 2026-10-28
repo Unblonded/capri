@@ -385,7 +385,8 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .dl.soon { color: var(--p2); background: color-mix(in srgb, var(--p2) 15%, transparent); }
 .dl.urgent, .dl.overdue { color: #fff; background: var(--p1); }
 .warn { color: var(--p1); font-weight: 600; }
-.meta .label { color: var(--muted); }
+.meta .label { --lc: var(--muted); color: color-mix(in srgb, var(--lc) 80%, var(--text)); background: color-mix(in srgb, var(--lc) 13%, transparent);
+  padding: 0 7px; border-radius: 99px; font-weight: 550; }
 .meta .proj { margin-left: auto; display: inline-flex; gap: 5px; align-items: center; }
 .meta .proj .dot { width: 7px; height: 7px; border-radius: 50%; }
 .task-actions {
@@ -1289,3 +1290,17 @@ img, svg { -webkit-user-drag: none; }
 .note-body::placeholder { color: var(--muted); }
 :root[data-theme="capri"] .sketch .note-paper, :root[data-theme="capri"] .note-body { border-color: rgba(255, 46, 92, .25); }
 :root[data-theme="capri"] .note-body { box-shadow: inset 0 0 0 1px rgba(255, 46, 92, .22), inset 0 0 24px rgba(154, 77, 255, .08); }
+
+/* ---- labels ---- */
+.chip.label-chip { --lc: var(--accent); }
+.chip.label-chip.on { background: color-mix(in srgb, var(--lc) 18%, transparent); border-color: color-mix(in srgb, var(--lc) 60%, transparent); color: color-mix(in srgb, var(--lc) 75%, var(--text)); font-weight: 600; }
+.chip.new-label { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); border-style: dashed; background: transparent; }
+.chip.new-label .ic { width: 12px; height: 12px; }
+.ctx-colors { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; padding: 6px 8px 8px; }
+.ctx-c { width: 16px; height: 16px; border-radius: 50%; border: 0; padding: 0; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .15); transition: transform .12s; }
+@media (hover: hover) { .ctx-c:hover { transform: scale(1.2); } }
+.ctx-c.on { outline: 2px solid var(--text); outline-offset: 2px; }
+.label-edit { display: inline-flex; align-items: center; gap: 7px; }
+.label-edit .dot { width: 9px; height: 9px; border-radius: 50%; }
+.nav-item.menu-on { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav-empty { padding: 4px 10px; color: var(--accent); }
