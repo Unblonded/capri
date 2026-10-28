@@ -1281,6 +1281,62 @@ function renderBoard(tasks, by, project) {
   }).join('')}${by === 'section' ? `<button class="column add-col" data-act="add-section">${ic('plus')} Add section</button>` : ''}</div>`;
 }
 
+// The board never scrolls sideways. Columns sit in lanes: one each while they fit across, and once
+// they don't, as many lanes as fit, each holding a run of neighbouring columns stacked top to
+// bottom (so the order still reads left to right), split so the tallest lane is as short as it can be.
+const COL_W = 290;
+const COL_GAP = 14;
+function layoutBoard() {
+  const board = $('#view .board');
+  if (!board) return;
+  $$(':scope > .lane', board).forEach((lane) => lane.replaceWith(...lane.children));
+  const cols = $$(':scope > .column', board);
+  const view = $('#view');
+  const cs = getComputedStyle(view);
+  const avail = view.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const fit = Math.max(1, Math.floor((avail + COL_GAP) / (COL_W + COL_GAP)));
+  const stacked = cols.length > fit;
+  const k = Math.min(fit, cols.length);
+  board.classList.toggle('stacked', stacked);
+  // Set before measuring, so each column's height is taken at the width it'll have.
+  board.style.setProperty('--lane-w', `${stacked ? Math.floor((avail - COL_GAP * (k - 1)) / k) : Math.min(COL_W, avail)}px`);
+  const runs = stacked ? splitRuns(cols.map((c) => c.offsetHeight), k) : cols.map((_, i) => [i, i + 1]);
+  for (const [a, b] of runs) {
+    const lane = document.createElement('div');
+    lane.className = 'lane';
+    lane.append(...cols.slice(a, b));
+    board.append(lane);
+  }
+}
+// Splits heights into k runs of neighbours, keeping the tallest run as short as possible.
+function splitRuns(h, k) {
+  const n = h.length;
+  const pre = [0];
+  for (const x of h) pre.push(pre.at(-1) + x);
+  const run = (a, b) => pre[b] - pre[a] + COL_GAP * (b - a - 1);
+  const best = Array.from({ length: n + 1 }, () => Array(k + 1).fill(Infinity));
+  const cut = Array.from({ length: n + 1 }, () => Array(k + 1).fill(0));
+  best[0][0] = 0;
+  for (let j = 1; j <= k; j++) {
+    for (let i = j; i <= n; i++) {
+      for (let m = j - 1; m < i; m++) {
+        const v = Math.max(best[m][j - 1], run(m, i));
+        if (v < best[i][j]) { best[i][j] = v; cut[i][j] = m; }
+      }
+    }
+  }
+  const runs = [];
+  for (let i = n, j = k; j > 0; j--) { runs.unshift([cut[i][j], i]); i = cut[i][j]; }
+  return runs;
+}
+let boardWidth = 0;
+new ResizeObserver(([entry]) => {
+  const w = Math.round(entry.contentRect.width);
+  if (w === boardWidth) return;
+  boardWidth = w;
+  if (!colDrag?.on) layoutBoard();
+}).observe($('#view'));
+
 // What dropping a card on a column changes, read from the column's data-drop.
 function dropOnColumn(id, column) {
   const t = taskById(id);
@@ -1473,6 +1529,7 @@ function renderView() {
   $('#view-sub').textContent = sub;
   $('#head-actions').innerHTML = actions;
   viewEl.innerHTML = html;
+  layoutBoard();
   state.baseTitle = `${title} · Capri`;
   renderRing();
   renderTimer();
@@ -2520,12 +2577,16 @@ function moveColumn(head, dir) {
 
 // Columns slide to their new places instead of jumping.
 function flipColumns(change) {
-  const before = new Map($$('.board .column[data-col]').map((c) => [c.dataset.col, c.getBoundingClientRect().left]));
+  const before = new Map($$('.board .column[data-col]').map((c) => [c.dataset.col, c.getBoundingClientRect()]));
   change();
   if (reducedMotion()) return;
   for (const c of $$('.board .column[data-col]')) {
-    const dx = (before.get(c.dataset.col) ?? NaN) - c.getBoundingClientRect().left;
-    if (dx) c.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    const was = before.get(c.dataset.col);
+    if (!was) continue;
+    const r = c.getBoundingClientRect();
+    const dx = was.left - r.left;
+    const dy = was.top - r.top;
+    if (dx || dy) c.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.2,.8,.2,1)' });
   }
 }
 
@@ -3006,7 +3067,8 @@ document.addEventListener('pointerdown', (e) => {
   const head = e.target.closest('.board .group-head[data-move]');
   if (!head || e.target.closest('button')) return;
   const col = head.closest('.column');
-  colDrag = { col, board: col.parentElement, x: e.clientX, y: e.clientY, left0: col.offsetLeft, on: false };
+  const r = col.getBoundingClientRect();
+  colDrag = { col, board: col.closest('.board'), x: e.clientX, y: e.clientY, gx: e.clientX - r.left, gy: e.clientY - r.top, on: false };
 });
 document.addEventListener('pointermove', (e) => {
   const d = colDrag;
@@ -3018,39 +3080,74 @@ document.addEventListener('pointermove', (e) => {
     document.body.classList.add('col-sorting');
   }
   e.preventDefault();
-  // Nudge the board along near the view's edges.
+  // Nudge the view along near its top and bottom.
   const view = $('#view');
   const vr = view.getBoundingClientRect();
-  if (e.clientX < vr.left + 60) view.scrollLeft -= 14;
-  else if (e.clientX > vr.right - 60) view.scrollLeft += 14;
-  // Where the dragged column's middle is, in the board's own coordinates (no transforms involved).
-  const mid = d.left0 + (e.clientX - d.x) + (view.scrollLeft - (d.scroll0 ??= view.scrollLeft)) + d.col.offsetWidth / 2;
-  const others = $$('.column', d.board).filter((c) => c !== d.col && c.querySelector('.group-head[data-move]'));
-  const before = others.find((c) => mid < c.offsetLeft + c.offsetWidth / 2);
-  const ref = before || others.at(-1)?.nextElementSibling || null;
-  if (ref !== d.col && d.col.nextElementSibling !== ref && others.length) {
-    const was = new Map(others.map((c) => [c, c.offsetLeft]));
-    d.board.insertBefore(d.col, ref);
-    for (const c of others) {
-      const dx = was.get(c) - c.offsetLeft;
-      if (dx) c.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' });
-    }
-  }
-  d.col.style.transform = `translateX(${d.left0 + (e.clientX - d.x) + (view.scrollLeft - d.scroll0) - d.col.offsetLeft}px)`;
+  if (e.clientY < vr.top + 60) view.scrollTop -= 14;
+  else if (e.clientY > vr.bottom - 60) view.scrollTop += 14;
+  // The dragged column's top-left in the board's own coordinates; offsetLeft/Top ignore transforms,
+  // so columns still sliding aside don't throw the maths off.
+  const br = d.board.getBoundingClientRect();
+  const px = e.clientX - br.left - d.gx;
+  const py = e.clientY - br.top - d.gy;
+  placeColumn(d, px + d.col.offsetWidth / 2, py + Math.min(d.col.offsetHeight, 80) / 2);
+  d.col.style.transform = `translate(${px - d.col.offsetLeft}px, ${py - d.col.offsetTop}px)`;
 });
+// Moves the dragged column into the lane under it, above the first column whose middle it's over.
+function placeColumn(d, cx, cy) {
+  const movable = (c) => c !== d.col && c.querySelector('.group-head[data-move]');
+  const lanes = $$(':scope > .lane', d.board);
+  const lane = lanes.find((l) => cx < l.offsetLeft + l.offsetWidth + COL_GAP / 2) || lanes.at(-1);
+  if (!lane) return;
+  let ref = [...lane.children].filter(movable).find((c) => cy < c.offsetTop + c.offsetHeight / 2)
+    || $(':scope > .add-col', lane);
+  // A lane of its own (side by side): pass a neighbour's middle to swap lanes with it.
+  if (!d.board.classList.contains('stacked') && lane !== d.col.parentElement) {
+    const other = [...lane.children].find(movable);
+    if (!other) return;
+    const target = cx < lane.offsetLeft + lane.offsetWidth / 2 ? lane : lane.nextElementSibling;
+    const mine = d.col.parentElement;
+    if (target === mine || target === mine.nextElementSibling && lanes.indexOf(lane) > lanes.indexOf(mine)) return;
+    const was = new Map(lanes.map((l) => [l, l.offsetLeft]));
+    d.board.insertBefore(mine, target);
+    slideFrom(was, lanes);
+    return;
+  }
+  if (d.col.parentElement === lane && (d.col.nextElementSibling || null) === (ref || null)) return;
+  const all = $$('.column', d.board).filter((c) => c !== d.col);
+  const was = new Map(all.map((c) => [c, [c.offsetLeft, c.offsetTop]]));
+  lane.insertBefore(d.col, ref || null);
+  for (const c of all) {
+    const [x, y] = was.get(c);
+    const dx = x - c.offsetLeft;
+    const dy = y - c.offsetTop;
+    if (dx || dy) c.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  }
+}
+function slideFrom(was, els) {
+  for (const el of els) {
+    const dx = was.get(el) - el.offsetLeft;
+    if (dx) el.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  }
+}
 function endColDrag() {
   const d = colDrag;
   colDrag = null;
   if (!d?.on) return;
   document.body.classList.remove('col-sorting');
+  const keys = movableKeys(d.board);
+  const by = d.board.dataset.by;
+  const was = by === 'section' ? projectSections(state.view.id).map((x) => x.id) : boardOrder.keys.filter((k) => keys.includes(k));
+  if (keys.join() !== was.join()) {
+    // Lanes are re-split for the new order; everything glides from where it is, the dropped column too.
+    flipColumns(() => saveColumnOrder(by, keys));
+    return;
+  }
   const from = d.col.style.transform;
   d.col.style.transform = '';
   d.col.classList.remove('col-dragging');
   if (from && !reducedMotion()) d.col.animate([{ transform: from }, { transform: 'none' }], { duration: 180, easing: 'ease-out' });
-  const keys = movableKeys(d.board);
-  const by = d.board.dataset.by;
-  const was = by === 'section' ? null : boardOrder.keys.filter((k) => keys.includes(k));
-  if (!was || keys.join() !== was.join()) saveColumnOrder(by, keys);
+  layoutBoard();
 }
 document.addEventListener('pointerup', endColDrag);
 document.addEventListener('pointercancel', endColDrag);
