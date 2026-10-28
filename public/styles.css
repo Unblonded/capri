@@ -998,24 +998,18 @@ html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -we
   .sidebar { transition: transform .5s var(--ease-out); }
 }
 
-/* ---- swipe a task: right completes, left deletes ---- */
+/* ---- swipe a task left to delete it ---- */
 .task > * { transform: translateX(var(--sx, 0)); transition: transform .5s var(--spring); }
 .task.swiping > * { transition: none; }
 .task.swipe-gone > * { transition: transform .28s var(--ease-out); }
 .task.swipe-gone { transition: opacity .28s; opacity: 0; }
 .task[data-swipe] { overflow: hidden; transform: none !important; }
-.task[data-swipe="complete"] { background: color-mix(in srgb, var(--green) 20%, transparent); }
 .task[data-swipe="delete"] { background: color-mix(in srgb, var(--p1) 20%, transparent); }
-.task.swipe-armed[data-swipe="complete"] { background: var(--green); }
 .task.swipe-armed[data-swipe="delete"] { background: var(--p1); }
 .task[data-swipe]::after {
   content: ""; position: absolute; top: 50%; width: 22px; height: 22px; margin-top: -11px;
   background: currentColor; transition: transform .4s var(--spring), color .2s; transform: scale(.7);
   -webkit-mask: var(--swipe-icon) center / contain no-repeat; mask: var(--swipe-icon) center / contain no-repeat;
-}
-.task[data-swipe="complete"]::after {
-  left: 18px; color: var(--green);
-  --swipe-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 12.5l5 5 10-11'/%3E%3C/svg%3E");
 }
 .task[data-swipe="delete"]::after {
   right: 18px; color: var(--p1);

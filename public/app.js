@@ -531,7 +531,7 @@ window.addEventListener('resize', closeDropdown);
 document.addEventListener('scroll', (e) => { if (ddOpen && !ddOpen.menu.contains(e.target)) closeDropdown(); }, true);
 
 // ---------- touch gestures ----------
-// Swipe a task right to complete it, left to delete it (with undo).
+// Swipe a task left to delete it (with undo). Swiping right is left to the sidebar.
 const SWIPE_COMMIT = 0.33; // share of the row's width to pass before letting go
 let swipe = null;
 let swipeEndedAt = 0;
@@ -553,16 +553,18 @@ document.addEventListener('pointermove', (e) => {
     if (Math.abs(dx) < 10) return;
     // On a board, sideways means scrolling the columns (a long press picks the card up instead).
     if (swipe.row.closest('.board')) { swipe = null; return; }
+    if (dx > 0) { swipe = null; return; }
     swipe.active = true;
     swipe.row.classList.add('swiping');
   }
   // Past the end of the row the drag gets heavier, like pulling on elastic.
   const w = swipe.row.offsetWidth;
-  const eased = Math.abs(dx) > w * 0.6 ? Math.sign(dx) * (w * 0.6 + (Math.abs(dx) - w * 0.6) * 0.3) : dx;
-  swipe.dx = dx;
+  const d = Math.min(0, dx); // dragging back past where it started stops at zero
+  const eased = -d > w * 0.6 ? -(w * 0.6 + (-d - w * 0.6) * 0.3) : d;
+  swipe.dx = d;
   swipe.row.style.setProperty('--sx', `${eased}px`);
-  swipe.row.dataset.swipe = dx > 0 ? 'complete' : 'delete';
-  swipe.row.classList.toggle('swipe-armed', Math.abs(dx) > w * SWIPE_COMMIT);
+  swipe.row.dataset.swipe = 'delete';
+  swipe.row.classList.toggle('swipe-armed', -d > w * SWIPE_COMMIT);
 });
 
 function endSwipe(e) {
@@ -579,11 +581,8 @@ function endSwipe(e) {
   }
   swipeEndedAt = Date.now();
   row.classList.remove('swiping', 'swipe-armed');
-  const commit = e.type === 'pointerup' && Math.abs(dx) > row.offsetWidth * SWIPE_COMMIT;
-  if (commit && dx > 0) {
-    row.style.setProperty('--sx', '0px');
-    completeTask(id);
-  } else if (commit) {
+  const commit = e.type === 'pointerup' && -dx > row.offsetWidth * SWIPE_COMMIT;
+  if (commit) {
     row.style.setProperty('--sx', `-${row.offsetWidth + 40}px`);
     row.classList.add('swipe-gone');
     setTimeout(() => deleteTaskSoon(id), 280);
@@ -3307,7 +3306,7 @@ document.addEventListener('touchmove', (e) => {
 }, { passive: true });
 document.addEventListener('touchend', () => { if (headHold) { clearTimeout(headHold.timer); headHold = null; } });
 
-// Phone: swipe right to pull the sidebar out (from the left edge, or anywhere off a task), swipe left to put it away.
+// Phone: swipe right to pull the sidebar out (from anywhere, tasks included), swipe left to put it away.
 // The sidebar follows the finger and settles open or shut depending on how far, and how fast, it went.
 const NAV_EDGE = 24;
 let navSwipe = null;
@@ -3321,7 +3320,8 @@ document.addEventListener('touchstart', (e) => {
   } else {
     if (!e.target.closest('.main') || $('.modal:not(.hidden), #detail:not(.hidden), .ctx-menu')) return;
     const edge = t.clientX < NAV_EDGE;
-    if (!edge && e.target.closest('.task, input, textarea, select, canvas, [contenteditable]')) return;
+    // Board cards scroll the columns sideways instead.
+    if (!edge && e.target.closest('.board .task, input, textarea, select, canvas, [contenteditable]')) return;
   }
   navSwipe = { open, x: t.clientX, y: t.clientY, t: e.timeStamp, last: t.clientX, lastT: e.timeStamp, v: 0, active: false };
 }, { passive: true });
