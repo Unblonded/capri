@@ -552,7 +552,7 @@ document.addEventListener('pointermove', (e) => {
     if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; }
     if (Math.abs(dx) < 10) return;
     // On a board, sideways means scrolling the columns (a long press picks the card up instead).
-    if (swipe.row.closest('.board')) { swipe = null; return; }
+    if (swipe.row.closest('.board') || hold?.ghost) { swipe = null; return; }
     if (dx > 0) { swipe = null; return; }
     swipe.active = true;
     swipe.row.classList.add('swiping');
@@ -1188,10 +1188,11 @@ function taskTree(list, opts, mode) {
 
 const collapsed = new Set(store.get('collapsed', []));
 
-// key makes the group collapsible; due makes it a drop target that reschedules.
-function group(title, body, { cls = '', sub = '', extra = '', key = '', due = '', section = '' } = {}) {
+// key makes the group collapsible; due makes it a drop target that reschedules, drop one that moves
+// tasks the way a board column does ({ project, section }).
+function group(title, body, { cls = '', sub = '', extra = '', key = '', due = '', section = '', drop = null } = {}) {
   const k = key && `${state.view.type}:${key}`;
-  return `<section class="group ${k && collapsed.has(k) ? 'collapsed' : ''}" ${due ? `data-due="${due}"` : ''}>
+  return `<section class="group ${k && collapsed.has(k) ? 'collapsed' : ''}" ${due ? `data-due="${due}"` : ''} ${drop ? `data-drop='${esc(JSON.stringify(drop))}'` : ''}>
     <div class="group-head ${cls}" ${section ? `data-section="${esc(section)}"` : ''}>${k ? `<button class="caret" data-collapse="${esc(k)}">${ic('chevron')}</button>` : ''}${esc(title)}<span class="muted">${esc(sub)}</span><span class="spacer"></span>${extra}</div>
     <div class="group-body">${body}</div></section>`;
 }
@@ -1500,7 +1501,8 @@ function renderView() {
           const items = tasks.filter((x) => (x.section_id || null) === s.id);
           if (s.id === null && !items.length && sections.length) return '';
           const body = taskTree(items, { showProject: false }) + inlineAdd({ project_id: p.id, section_id: s.id });
-          return s.id === null ? `<section class="group">${body}</section>` : group(s.name, body, { sub: String(items.length), key: s.id, section: s.id });
+          const drop = { project: p.id, section: s.id || '' };
+          return s.id === null ? `<section class="group" data-drop='${esc(JSON.stringify(drop))}'>${body}</section>` : group(s.name, body, { sub: String(items.length), key: s.id, section: s.id, drop });
         }).join('');
       }
     }
@@ -2957,8 +2959,25 @@ document.addEventListener('submit', async (e) => {
   } catch (err) { toast(err.message); }
 });
 
-// Drag & drop: board columns change whatever they group by (section, date, priority, project, label), day groups reschedule, sidebar projects move, "Today" schedules.
-const dropTargetOf = (el) => el.closest('.column[data-drop], .group[data-due], .nav-item[data-nav="project"], .nav-item[data-nav="today"]');
+// Drag & drop: board columns change whatever they group by (section, date, priority, project, label), a project's
+// sections move tasks between them, day groups reschedule, sidebar projects move, "Today" schedules.
+const dropTargetOf = (el) => el?.closest('.column[data-drop], .group[data-drop], .group[data-due], .nav-item[data-nav="project"], .nav-item[data-nav="today"]');
+const dropClass = (target) => (target.classList.contains('column') ? 'drop-target' : 'drop-hover');
+
+function dropTask(id, target) {
+  const t = taskById(id);
+  if (!t) return;
+  if (target.dataset.drop) {
+    dropOnColumn(id, target);
+  } else if (target.dataset.due) {
+    if (dueDay(t) !== target.dataset.due) setDueDate(id, target.dataset.due);
+  } else if (target.dataset.nav === 'today') {
+    setDue(id, 'today');
+  } else if (target.dataset.nav === 'project' && target.dataset.id !== t.project_id) {
+    moveTask(id, target.dataset.id, null);
+    toast(`Moved to ${projectName(projectById(target.dataset.id))}`);
+  }
+}
 
 document.addEventListener('dragstart', (e) => {
   const row = e.target.closest('[data-task]');
@@ -2976,35 +2995,23 @@ document.addEventListener('dragover', (e) => {
   $$('.drop-target, .drop-hover').forEach((c) => c !== target && c.classList.remove('drop-target', 'drop-hover'));
   if (!target) return;
   e.preventDefault();
-  target.classList.add(target.classList.contains('column') ? 'drop-target' : 'drop-hover');
+  target.classList.add(dropClass(target));
 });
 document.addEventListener('drop', (e) => {
   const target = dropTargetOf(e.target);
   $$('.drop-target, .drop-hover').forEach((c) => c.classList.remove('drop-target', 'drop-hover'));
   if (!target) return;
   e.preventDefault();
-  const id = e.dataTransfer.getData('text/plain');
-  const t = taskById(id);
-  if (!t) return;
-  if (target.classList.contains('column')) {
-    dropOnColumn(id, target);
-  } else if (target.dataset.due) {
-    if (dueDay(t) !== target.dataset.due) setDueDate(id, target.dataset.due);
-  } else if (target.dataset.nav === 'today') {
-    setDue(id, 'today');
-  } else if (target.dataset.nav === 'project' && target.dataset.id !== t.project_id) {
-    moveTask(id, target.dataset.id, null);
-    toast(`Moved to ${projectName(projectById(target.dataset.id))}`);
-  }
+  dropTask(e.dataTransfer.getData('text/plain'), target);
 });
 
-// Touch: hold a board card for a moment to pick it up, drag it onto another column and let go.
-// Dragging near the edges scrolls the board.
+// Touch: hold a task for a moment to pick it up, drag it onto another column, section or day and let go
+// (letting go where it started opens its menu instead). Dragging near the edges scrolls the view.
 const HOLD_MS = 380;
 let hold = null;
 document.addEventListener('touchstart', (e) => {
-  const row = e.target.closest('.board .task[data-task]');
-  if (!row || hold || e.touches.length > 1 || e.target.closest('button, a')) return;
+  const row = e.target.closest('#view .task[data-task]');
+  if (!row || hold || e.touches.length > 1 || e.target.closest('button, a, input, textarea')) return;
   row.draggable = false; // keep iOS's own drag-and-drop out of it
   const p = e.touches[0];
   hold = { row, x: p.clientX, y: p.clientY, cx: p.clientX, cy: p.clientY, timer: setTimeout(liftCard, HOLD_MS) };
@@ -3020,7 +3027,7 @@ function liftCard() {
   document.body.append(ghost);
   row.classList.add('dragging');
   hold.ghost = ghost;
-  hold.home = row.closest('.column');
+  hold.home = dropTargetOf(row);
   navigator.vibrate?.(10);
   const view = $('#view');
   view.classList.add('carrying'); // snapping would pull every edge-scroll straight back
@@ -3037,10 +3044,10 @@ function liftCard() {
 }
 
 function pickColumn() {
-  const col = document.elementFromPoint(hold.cx, hold.cy)?.closest('.column[data-drop]');
+  const col = dropTargetOf(document.elementFromPoint(hold.cx, hold.cy));
   hold.col = col && col !== hold.home ? col : null;
-  $$('.column.drop-target').forEach((c) => c !== hold.col && c.classList.remove('drop-target'));
-  hold.col?.classList.add('drop-target');
+  $$('.drop-target, .drop-hover').forEach((c) => c !== hold.col && c.classList.remove('drop-target', 'drop-hover'));
+  hold.col?.classList.add(dropClass(hold.col));
 }
 
 document.addEventListener('touchmove', (e) => {
@@ -3054,17 +3061,18 @@ document.addEventListener('touchmove', (e) => {
     return;
   }
   e.preventDefault();
+  if (Math.hypot(p.clientX - hold.x, p.clientY - hold.y) > 8) hold.moved = true;
   hold.ghost.style.transform = `translate(${p.clientX - hold.x}px, ${p.clientY - hold.y}px) rotate(1.5deg) scale(1.03)`;
 }, { passive: false });
 
 function endHold(drop = false) {
   if (!hold) return;
-  const { row, ghost, col, timer, raf } = hold;
+  const { row, ghost, col, timer, raf, moved, x, y } = hold;
   hold = null;
   clearTimeout(timer);
   cancelAnimationFrame(raf);
   row.draggable = true;
-  $$('.column.drop-target').forEach((c) => c.classList.remove('drop-target'));
+  $$('.drop-target, .drop-hover').forEach((c) => c.classList.remove('drop-target', 'drop-hover'));
   if (!ghost) return;
   $('#view').classList.remove('carrying');
   swipeEndedAt = Date.now(); // the lift-off isn't a tap on the card
@@ -3075,9 +3083,11 @@ function endHold(drop = false) {
     const r = row.getBoundingClientRect();
     row.style.transform = `translate(${g.left - r.left}px, ${g.top - r.top}px)`;
     ghost.remove();
-    dropOnColumn(row.dataset.task, col);
+    dropTask(row.dataset.task, col);
     if (row.isConnected) row.style.transform = '';
   } else {
+    // Held and let go without moving: the long-press menu (it also stands in for Android's own, which the hold swallows).
+    if (drop && !moved) openTaskMenu(row.dataset.task, x, y);
     ghost.animate([{ opacity: 1 }, { opacity: 0, transform: 'none' }], { duration: 180, easing: 'ease-out' }).finished.then(() => ghost.remove());
   }
 }
