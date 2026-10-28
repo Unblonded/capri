@@ -114,11 +114,11 @@ function createWindow() {
   });
 
   // Todoist links and the like open in the normal browser.
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+  win.webContents.setWindowOpenHandler(({ url }) => { openOutside(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => {
-    if (url.startsWith('file:') || (config.serverUrl && url.startsWith(config.serverUrl))) return;
+    if (url.startsWith('file:') || isServer(url)) return;
     e.preventDefault();
-    shell.openExternal(url);
+    openOutside(url);
   });
 
   // F5 / Ctrl+R reload, Ctrl+Shift+I devtools, since there's no menu bar.
@@ -172,6 +172,18 @@ function startedHidden() {
 }
 
 const setOpenAtLogin = (openAtLogin) => app.setLoginItemSettings({ openAtLogin, args: ['--hidden'] });
+
+// Only ordinary web and mail links leave the app: anything else (file:, other apps' link types) could
+// open or run something on this computer.
+function openOutside(url) {
+  try {
+    if (['http:', 'https:', 'mailto:'].includes(new URL(url).protocol)) shell.openExternal(url);
+  } catch { /* not a URL */ }
+}
+// The same server exactly (scheme, host and port), not just an address that starts the same way.
+function isServer(url) {
+  try { return Boolean(config.serverUrl) && new URL(url).origin === new URL(config.serverUrl).origin; } catch { return false; }
+}
 
 function showWindow() {
   if (config.pinned) raised = true;

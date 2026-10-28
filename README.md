@@ -18,8 +18,9 @@ Open http://localhost:3300 and sign in:
 
 There are no Capri accounts or passwords: **your Todoist token is your login.**
 
-- Each browser or desktop app keeps its own token in an `HttpOnly` cookie (marked `Secure` over HTTPS), valid for a year. *Sign out* in the sidebar clears it.
-- The server never stores tokens. It reads the cookie on each request and uses it to call the Todoist API v1 on that person's behalf, so several people can share one Capri server and each only sees their own Todoist.
+- Signing in checks the token with Todoist and starts a session. Each browser or desktop app gets a random session id in an `HttpOnly` cookie (marked `Secure` over HTTPS); the token itself stays on the server, encrypted (AES-256-GCM) in `data/sessions.json` with a key from `CAPRI_SECRET` or, if that's unset, `data/secret.key` (made on first run). Keep `data/` private and backed up together: without the key, everyone signs in again.
+- *Sign out* in the sidebar ends that device's session on the server, so a copied cookie stops working too. *Every device* ends all of your sessions at once. A session unused for 180 days ends on its own. Devices signed in before sessions existed are moved over automatically on their next visit.
+- Only tokens Todoist accepts get a session, so nobody can store data on your server with a made-up token. The server uses each session's token to call the Todoist API v1 on that person's behalf, so several people can share one Capri server and each only sees their own Todoist.
 - Capri's own data (notes and sketches, your schedule, deadlines, the order of board columns) is stored per person under `data/users/<hash of token>/`. The folder name is a one-way SHA-256 hash, so the token can't be recovered from it. That data follows your token. If your token stops working (you regenerated it, or it expired), Capri says so and asks for the new one; entering it on a device that used the old one brings your notes, schedule and settings across, as long as both tokens belong to the same Todoist account.
 
 ## Hosting it on a domain (e.g. https://capri.kalculator.lol)
@@ -29,7 +30,11 @@ Run the server on the computer that stays on, and put your domain in front of it
 1. `npm install && npm start`
 2. Open the domain and sign in with your Todoist token.
 
-Use HTTPS on the domain so the token cookie is always encrypted in transit. If your proxy isn't on the same machine or private network, set `TRUST_PROXY` to its address so HTTPS is detected correctly.
+Use HTTPS on the domain so the session cookie is always encrypted in transit. If your proxy isn't on the same machine or private network, set `TRUST_PROXY` to its address so HTTPS is detected correctly.
+
+If you only reach Capri through the domain (the tunnel or proxy runs on the same computer), set `HOST=127.0.0.1` in `.env`. Then nothing else on your network can talk to it over plain http. Leave it at `0.0.0.0` if a desktop app or phone connects to it directly by IP address.
+
+Every page is sent with browser protections: a content security policy (only Capri's own scripts run), no framing by other sites, no MIME sniffing, and HSTS over HTTPS.
 
 ## Updating the server PC
 
@@ -142,5 +147,5 @@ In the sketch pad: `p` pen, `h` highlighter, `e` eraser, `[` `]` brush size, `�
 
 ## Layout
 
-- `server.js` — Express server, token storage, OAuth, Todoist API proxy
+- `server.js` — Express server, sessions (encrypted token storage), security headers, OAuth, Todoist API proxy
 - `public/index.html`, `public/styles.css`, `public/app.js` — the UI (no build step)

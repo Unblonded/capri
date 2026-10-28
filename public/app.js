@@ -3313,7 +3313,8 @@ function askText(title, { placeholder = '', ok = 'Create', value = '' } = {}) {
 }
 
 // Our own yes/no dialog instead of the browser's confirm() box.
-function askConfirm(title, { body = '', ok = 'OK', cancel = 'Cancel', danger = false, icon = danger ? 'trash' : 'warn' } = {}) {
+// Resolves true (ok), false (cancel), or 'alt' when an alt button is given and chosen.
+function askConfirm(title, { body = '', ok = 'OK', cancel = 'Cancel', alt = '', danger = false, icon = danger ? 'trash' : 'warn' } = {}) {
   return new Promise((resolve) => {
     const prev = document.activeElement;
     const modal = document.createElement('div');
@@ -3324,6 +3325,7 @@ function askConfirm(title, { body = '', ok = 'OK', cancel = 'Cancel', danger = f
       ${body ? `<p class="confirm-body">${esc(body)}</p>` : ''}
       <div class="ask-actions">
         <button type="button" class="btn" data-ask="no">${esc(cancel)}</button>
+        ${alt ? `<button type="button" class="btn" data-ask="alt">${esc(alt)}</button>` : ''}
         <button type="button" class="btn primary ${danger ? 'danger-btn' : ''}" data-ask="yes">${esc(ok)}</button>
       </div>
     </div>`;
@@ -3335,16 +3337,17 @@ function askConfirm(title, { body = '', ok = 'OK', cancel = 'Cancel', danger = f
     };
     modal.addEventListener('click', (e) => {
       const b = e.target.closest('[data-ask]');
-      if (b) done(b.dataset.ask === 'yes');
+      if (b) done(b.dataset.ask === 'alt' ? 'alt' : b.dataset.ask === 'yes');
       else if (e.target === modal) done(false);
     });
     modal.addEventListener('keydown', (e) => {
       e.stopPropagation();
       if (e.key === 'Escape') { e.preventDefault(); done(false); }
-      if (e.key === 'Tab') { // keep focus on the two buttons
+      if (e.key === 'Tab') { // keep focus on the dialog's buttons
         e.preventDefault();
-        const [no, yes] = modal.querySelectorAll('[data-ask]');
-        (document.activeElement === yes ? no : yes).focus();
+        const btns = [...modal.querySelectorAll('[data-ask]')];
+        const i = btns.indexOf(document.activeElement);
+        btns[(i + (e.shiftKey ? btns.length - 1 : 1)) % btns.length].focus();
       }
     });
     document.body.appendChild(modal);
@@ -4309,8 +4312,12 @@ $('#timer-reset').addEventListener('click', resetTimer);
 $('#timer-switch').addEventListener('click', switchTimer);
 $('#timer-task').addEventListener('click', () => timer.taskId && taskById(timer.taskId) && openDetail(timer.taskId));
 $('#disconnect-btn').addEventListener('click', async () => {
-  if (!(await askConfirm('Sign out of Capri?', { body: 'Only on this device. Sign back in any time with your Todoist token.', ok: 'Sign out', icon: 'external' }))) return;
-  await api('POST', '/api/disconnect');
+  const choice = await askConfirm('Sign out of Capri?', {
+    body: 'Sign back in any time with your Todoist token. "Every device" also signs out your phone, other browsers and the desktop app.',
+    ok: 'Sign out', alt: 'Every device', icon: 'external',
+  });
+  if (!choice) return;
+  await api('POST', '/api/disconnect', { everywhere: choice === 'alt' });
   // Forget this account's tasks saved for offline use (see sw.js).
   try { await caches.delete('capri-data-v1'); } catch { /* no cache storage */ }
   state.tasks = [];
