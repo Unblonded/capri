@@ -1286,23 +1286,33 @@ function renderBoard(tasks, by, project) {
 // The board never scrolls sideways. Columns sit in lanes: one each while they fit across, and once
 // they don't, as many lanes as fit, each holding a run of neighbouring columns stacked top to
 // bottom (so the order still reads left to right), split so the tallest lane is as short as it can be.
+// Where you've stacked a column under another or given it a lane of its own by dragging, that's
+// kept (saved per board as lane "joins" and "breaks").
 const COL_W = 290;
 const COL_GAP = 14;
+const lanesKey = (by) => `lanes:${boardKey()}:${by}`;
 function layoutBoard() {
   const board = $('#view .board');
   if (!board) return;
   $$(':scope > .lane', board).forEach((lane) => lane.replaceWith(...lane.children));
   const cols = $$(':scope > .column', board);
+  const keys = cols.map((c) => c.dataset.col || '+');
+  const pref = state.prefs[lanesKey(board.dataset.by)] || {};
+  const joins = new Set(pref.joins);
+  const breaks = new Set(pref.breaks);
+  const joined = (i) => i > 0 && joins.has(keys[i]);
   const view = $('#view');
   const cs = getComputedStyle(view);
   const avail = view.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
   const fit = Math.max(1, Math.floor((avail + COL_GAP) / (COL_W + COL_GAP)));
-  const stacked = cols.length > fit;
-  const k = Math.min(fit, cols.length);
-  board.classList.toggle('stacked', stacked);
+  const natural = keys.filter((_, i) => !joined(i)).length; // lanes if only your stacks share
+  const k = Math.min(fit, natural);
+  board.classList.toggle('stacked', k < cols.length);
   // Set before measuring, so each column's height is taken at the width it'll have.
-  board.style.setProperty('--lane-w', `${stacked ? Math.floor((avail - COL_GAP * (k - 1)) / k) : Math.min(COL_W, avail)}px`);
-  const runs = stacked ? splitRuns(cols.map((c) => c.offsetHeight), k) : cols.map((_, i) => [i, i + 1]);
+  board.style.setProperty('--lane-w', `${natural > fit ? Math.floor((avail - COL_GAP * (k - 1)) / k) : Math.min(COL_W, avail)}px`);
+  const h = cols.map((c) => c.offsetHeight);
+  // More lanes of your own than fit: your stacks stay, the extra lane starts give way.
+  const runs = splitRuns(h, k, (i) => !joined(i), (i) => breaks.has(keys[i])) || splitRuns(h, k, (i) => !joined(i)) || splitRuns(h, k);
   for (const [a, b] of runs) {
     const lane = document.createElement('div');
     lane.className = 'lane';
@@ -1310,8 +1320,9 @@ function layoutBoard() {
     board.append(lane);
   }
 }
-// Splits heights into k runs of neighbours, keeping the tallest run as short as possible.
-function splitRuns(h, k) {
+// Splits heights into k runs of neighbours, keeping the tallest run as short as possible. A run may
+// only start where canStart allows, and must start wherever mustStart says. Null if it can't be done.
+function splitRuns(h, k, canStart = () => true, mustStart = () => false) {
   const n = h.length;
   const pre = [0];
   for (const x of h) pre.push(pre.at(-1) + x);
@@ -1321,15 +1332,25 @@ function splitRuns(h, k) {
   best[0][0] = 0;
   for (let j = 1; j <= k; j++) {
     for (let i = j; i <= n; i++) {
-      for (let m = j - 1; m < i; m++) {
+      for (let m = i - 1; m >= j - 1; m--) {
+        if (m + 1 < i && mustStart(m + 1)) break; // the run m..i-1 would swallow a required start
+        if (m > 0 && !canStart(m)) continue;
         const v = Math.max(best[m][j - 1], run(m, i));
         if (v < best[i][j]) { best[i][j] = v; cut[i][j] = m; }
       }
     }
   }
+  if (best[n][k] === Infinity) return null;
   const runs = [];
   for (let i = n, j = k; j > 0; j--) { runs.unshift([cut[i][j], i]); i = cut[i][j]; }
   return runs;
+}
+function saveLanes(by, lanes) {
+  const key = lanesKey(by);
+  const known = new Set([...boardOrder.keys, 'none']);
+  const value = lanes && { breaks: [...lanes.breaks].filter((k) => known.has(k)), joins: [...lanes.joins].filter((k) => known.has(k)) };
+  if (value) state.prefs[key] = value; else delete state.prefs[key];
+  api('POST', '/api/prefs', { key, value: value || null }).catch((err) => toast(err.message));
 }
 let boardWidth = 0;
 new ResizeObserver(([entry]) => {
@@ -3109,38 +3130,73 @@ function liftColumn(d) {
   };
   d.raf = requestAnimationFrame(step);
 }
-// Picks the column nearest the pointer and which side of it the dragged one would go.
+// Picks the column nearest the pointer and where the dragged one would go: on its top or bottom
+// half, stacked above or below it; on its left or right edge, a lane of its own beside that lane.
 function aimColumn(d) {
-  const stacked = d.board.classList.contains('stacked');
   let best = null;
-  for (const c of $$('.column', d.board)) {
-    if (c === d.col || !c.querySelector('.group-head[data-move]')) continue;
+  for (const c of $$('.column[data-col]', d.board)) {
+    if (c === d.col) continue;
     const r = c.getBoundingClientRect();
     const dx = Math.max(r.left - d.cx, 0, d.cx - r.right);
     const dy = Math.max(r.top - d.cy, 0, d.cy - r.bottom);
     const dist = Math.hypot(dx, dy);
     if (!best || dist < best.dist) best = { c, r, dist };
   }
-  const keys = movableKeys(d.board);
-  const from = d.head.dataset.move;
-  d.drop = null;
+  d.plan = null;
   if (best) {
     const { c, r } = best;
-    // Side by side, the left or right half decides; stacked in lanes, the top or bottom half.
-    const after = stacked ? d.cy > r.top + Math.min(r.height, 160) / 2 : d.cx > r.left + r.width / 2;
-    const key = $('.group-head[data-move]', c).dataset.move;
-    const rest = keys.filter((k) => k !== from);
-    rest.splice(rest.indexOf(key) + (after ? 1 : 0), 0, from);
-    if (rest.join() !== keys.join()) {
-      d.drop = rest;
+    const edge = Math.min(r.width * 0.22, 70);
+    let mode = d.cx < r.left + edge ? 'left' : d.cx > r.right - edge ? 'right' : d.cy > r.top + r.height / 2 ? 'below' : 'above';
+    // Nothing goes before a column that can't move (No section).
+    if (!c.querySelector('.group-head[data-move]')) mode = { above: 'below', left: 'right' }[mode] || mode;
+    d.plan = planDrop(d, c.dataset.col, mode);
+    if (d.plan) {
       const m = d.marker.style;
-      if (stacked) Object.assign(m, { left: `${r.left}px`, top: `${(after ? r.bottom : r.top) + (after ? 7 : -7) - 2}px`, width: `${r.width}px`, height: '4px' });
-      else Object.assign(m, { left: `${(after ? r.right + 7 : r.left - 7) - 2}px`, top: `${r.top}px`, width: '4px', height: `${Math.min(r.height, innerHeight - r.top - 16)}px` });
+      const lr = c.parentElement.getBoundingClientRect();
+      if (mode === 'above' || mode === 'below') {
+        Object.assign(m, { left: `${r.left}px`, top: `${(mode === 'below' ? r.bottom + 7 : r.top - 7) - 2}px`, width: `${r.width}px`, height: '4px' });
+      } else {
+        const top = Math.max(lr.top, 0);
+        Object.assign(m, { left: `${(mode === 'right' ? lr.right + 7 : lr.left - 7) - 2}px`, top: `${top}px`, width: '4px', height: `${Math.max(40, Math.min(lr.bottom, innerHeight - 16) - top)}px` });
+      }
     }
   }
-  d.marker.classList.toggle('on', !!d.drop);
-  d.tag.classList.toggle('no-drop', !d.drop);
+  d.marker.classList.toggle('on', !!d.plan);
+  d.tag.classList.toggle('no-drop', !d.plan);
 }
+
+// The new column order and lane choices for dropping column d next to column `target`; null if
+// nothing would change.
+function planDrop(d, target, mode) {
+  const x = d.col.dataset.col;
+  const by = d.board.dataset.by;
+  const keyOf = (c) => c.dataset.col || '+';
+  const lanes = $$(':scope > .lane', d.board).map((l) => [...l.children].map(keyOf));
+  const cur = state.prefs[lanesKey(by)] || {};
+  const breaks = new Set(cur.breaks);
+  const joins = new Set(cur.joins);
+  const brk = (k) => { if (k && k !== '+') { breaks.add(k); joins.delete(k); } };
+  const join = (k) => { if (k && k !== '+') { joins.add(k); breaks.delete(k); } };
+  // Leaving the top of a lane: whatever was under it now starts that lane.
+  const home = lanes.find((l) => l.includes(x));
+  if (home[0] === x) brk(home[1]);
+  const rest = lanes.map((l) => l.filter((k) => k !== x)).filter((l) => l.length);
+  const lane = rest.find((l) => l.includes(target));
+  const i = lane.indexOf(target);
+  const seq = rest.flat();
+  let at;
+  if (mode === 'above') { at = seq.indexOf(target); if (i > 0) join(x); else brk(x); join(target); }
+  else if (mode === 'below') { at = seq.indexOf(target) + 1; join(x); join(lane[i + 1]); }
+  else if (mode === 'left') { at = seq.indexOf(lane[0]); brk(x); brk(lane[0]); }
+  else { at = seq.indexOf(lane.at(-1)) + 1; brk(x); brk(rest[rest.indexOf(lane) + 1]?.[0]); }
+  seq.splice(at, 0, x);
+  const movable = new Set(movableKeys(d.board));
+  const order = seq.filter((k) => movable.has(k));
+  const same = (a, b) => a.size === b.size && [...a].every((k) => b.has(k));
+  if (order.join() === movableKeys(d.board).join() && same(breaks, new Set(cur.breaks)) && same(joins, new Set(cur.joins))) return null;
+  return { order, lanes: { breaks, joins } };
+}
+
 function endColDrag(e) {
   const d = colDrag;
   colDrag = null;
@@ -3150,7 +3206,11 @@ function endColDrag(e) {
   d.tag.remove();
   d.marker.remove();
   d.col.classList.remove('col-source');
-  if (d.drop && e?.type === 'pointerup') flipColumns(() => saveColumnOrder(d.board.dataset.by, d.drop));
+  if (!d.plan || e?.type !== 'pointerup') return;
+  const by = d.board.dataset.by;
+  const moved = d.plan.order.join() !== movableKeys(d.board).join();
+  saveLanes(by, d.plan.lanes);
+  flipColumns(() => (moved ? saveColumnOrder(by, d.plan.order) : renderAnimated()));
 }
 document.addEventListener('pointerup', endColDrag);
 document.addEventListener('pointercancel', endColDrag);
@@ -3173,7 +3233,10 @@ function arrangeColumns(board) {
   const done = (save) => {
     modal.remove();
     const keys = $$('.arrange-row', list).map((r) => r.dataset.key);
-    if (save && keys.join() !== heads.map((h) => h.dataset.move).join()) flipColumns(() => saveColumnOrder(by, keys));
+    if (save && keys.join() !== heads.map((h) => h.dataset.move).join()) {
+      saveLanes(by, null); // a fresh order: let the lanes balance themselves again
+      flipColumns(() => saveColumnOrder(by, keys));
+    }
   };
   modal.addEventListener('click', (e) => {
     if (e.target.closest('[data-ask-ok]')) done(true);
