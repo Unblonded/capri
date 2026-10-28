@@ -546,6 +546,7 @@ body.col-sorting, body.col-sorting * { cursor: grabbing !important; user-select:
   .app { padding: 8px; gap: 8px; }
   .sidebar { position: fixed; inset: 8px auto 8px 8px; z-index: 45; transform: translateX(-110%); transition: transform .25s; background: var(--glass-strong); }
   .sidebar.open { transform: none; }
+  .sidebar { overscroll-behavior: contain; }
   .menu-btn { display: grid; }
   .main-head { padding: 14px 16px 8px; flex-wrap: wrap; }
   /* Keep room for the title; buttons that don't fit drop to their own line. */

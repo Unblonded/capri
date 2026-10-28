@@ -3361,6 +3361,21 @@ const endNavSwipe = () => {
   side.style.transform = '';
   scrim.style.opacity = scrim.style.visibility = '';
 };
+// iOS hands a scroll the sidebar can't take (list too short, or already at the top or bottom) to the page
+// behind it, which drags the whole app around. Keep vertical drags inside the open sidebar.
+let navScrollY = null;
+let navScrollX = 0;
+$('#sidebar').addEventListener('touchstart', (e) => { navScrollY = e.touches[0].clientY; navScrollX = e.touches[0].clientX; }, { passive: true });
+$('#sidebar').addEventListener('touchmove', (e) => {
+  if (navScrollY == null || e.touches.length > 1) return;
+  const side = e.currentTarget;
+  const dy = e.touches[0].clientY - navScrollY;
+  if (Math.abs(e.touches[0].clientX - navScrollX) > Math.abs(dy)) return; // a sideways swipe closes it instead
+  const atTop = side.scrollTop <= 0;
+  const atEnd = side.scrollTop + side.clientHeight >= side.scrollHeight - 1;
+  if ((dy > 0 && atTop) || (dy < 0 && atEnd)) e.preventDefault();
+}, { passive: false });
+$('#sidebar-scrim').addEventListener('touchmove', (e) => { if (!navSwipe?.active) e.preventDefault(); }, { passive: false });
 document.addEventListener('touchend', endNavSwipe);
 document.addEventListener('touchcancel', endNavSwipe);
 
