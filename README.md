@@ -90,7 +90,7 @@ Capri keeps a copy of itself and your last tasks on the device (`public/sw.js`),
 
 ## Mac app
 
-`npm run dist:mac` builds native apps for Apple Silicon and Intel: `dist/Capri-<version>-mac-arm64.dmg` and `…-mac-x64.dmg` (plus zips). Same features as the Windows app: menu-bar icon, ⌘⇧Space quick add, *Open at login*, always on top, clear cache.
+`npm run dist:mac` builds native apps for Apple Silicon and Intel: `dist/Capri-<version>-mac-arm64.dmg` and `…-mac-x64.dmg`. Same features as the Windows app: menu-bar icon, ⌘⇧Space quick add, *Open at login*, always on top, clear cache.
 
 The apps are ad-hoc signed, not notarised (that needs a paid Apple Developer account), so the first time: drag Capri to Applications, then **right-click → Open → Open**. If macOS still says it's damaged, run `xattr -cr /Applications/Capri.app`. Mac copies don't update themselves; install the new dmg to update.
 
