@@ -1,4 +1,4 @@
-# Capri ♑
+# Capri
 
 Steady climb, one task at a time. Named for Capricorn, the steady climber: midnight-sky glass, gold accents, and a gold check climbing out of a mountain ridge as its mark. A nicer, more advanced Todoist client on Express + Node.js that syncs with your real Todoist account.
 
