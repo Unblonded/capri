@@ -950,7 +950,9 @@ function applyHash() {
   state.picked.clear();
   $('#sidebar').classList.remove('open');
   render();
-  animateViewIn();
+  if (schedSwap && type === 'schedule') animateSchedSwap();
+  else animateViewIn();
+  schedSwap = null;
 }
 
 // Rows flow in one after another when you switch views (not on background re-renders).
@@ -1052,6 +1054,38 @@ function animateSync(before, { full = false, edits = false } = {}) {
       [{ opacity: 1, transform: 'none', filter: 'none' }, { opacity: 0, transform: 'translateX(28px) scale(.97)', filter: 'blur(3px)' }],
       { duration: 240, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' },
     ).finished.then(() => el.remove(), () => el.remove());
+  }
+}
+
+// Switching list ⇄ board: each task glides from where it was to its new spot, a few after another,
+// while the columns, headings and add rows fade up around them. Off-screen rows are left alone.
+function morphLayout(apply) {
+  if (reducedMotion()) return apply();
+  const before = taskRowsOnScreen();
+  apply();
+  const view = $('#view');
+  const seen = (r) => r.height && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
+  let i = 0;
+  for (const el of $$('.task[data-task]', view)) {
+    const rect = el.getBoundingClientRect();
+    if (!seen(rect)) continue;
+    const old = before.get(el.dataset.task)?.rect;
+    const delay = Math.min(i++, 14) * 18;
+    if (!old || !seen(old)) {
+      el.animate([{ opacity: 0, transform: 'translateY(10px) scale(.97)', filter: 'blur(4px)' }, { opacity: 1, transform: 'none', filter: 'none' }],
+        { duration: 460, delay: delay + 80, easing: SYNC_EASE, fill: 'backwards' });
+      continue;
+    }
+    el.animate([{ transform: `translate(${old.left - rect.left}px, ${old.top - rect.top}px)`, opacity: 0.6 }, { transform: 'none', opacity: 1 }],
+      { duration: 540, delay, easing: SYNC_EASE, fill: 'backwards' });
+  }
+  // Columns hold the gliding cards, so only their glass fades in, not what's inside.
+  for (const el of $$('.column', view)) {
+    el.animate([{ backgroundColor: 'transparent', borderColor: 'transparent', boxShadow: 'none', backdropFilter: 'blur(0px)' }, {}],
+      { duration: 420, easing: 'ease-out' });
+  }
+  for (const el of $$('.group-head, .inline-add', view)) {
+    el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 380, delay: 120, easing: SYNC_EASE, fill: 'backwards' });
   }
 }
 
@@ -1713,6 +1747,36 @@ function heroHtml() {
     <div class="sh-title">${next ? 'Free time' : dayBlocks(today()).length ? 'All done for today' : 'Nothing planned today'}</div>
     <div class="sh-left">${next ? `<b>${lengthText(toMin(next.start) - now)}</b> until ${esc(next.title)} at ${esc(fmtTime(next.start))}` : schedules().length ? 'Enjoy the rest of the day.' : 'Make a schedule below and it repeats on the days you pick.'}</div>
   </div>`;
+}
+
+// Changing tabs: the highlight slides from the old tab to the new one, and the new schedule's contents
+// come in from the side you moved towards, its blocks rising in one after another.
+let schedSwap = null; // { from: the old tab's rect, dir: -1 | 0 | 1 } while a tab change is on its way
+function animateSchedSwap() {
+  if (reducedMotion()) return;
+  const { from, dir } = schedSwap;
+  const on = $('.stab.on');
+  if (from && on) {
+    const to = on.getBoundingClientRect();
+    const pill = document.createElement('div');
+    pill.className = 'stab-glide';
+    Object.assign(pill.style, { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px` });
+    document.body.append(pill);
+    on.classList.add('gliding');
+    const done = () => { pill.remove(); on.classList.remove('gliding'); };
+    pill.animate(
+      [{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)`, width: `${from.width}px`, height: `${from.height}px` }, { transform: 'none', width: `${to.width}px`, height: `${to.height}px` }],
+      { duration: 420, easing: SYNC_EASE },
+    ).finished.then(done, done);
+  }
+  $$('.sched > :not(.sched-tabs)', $('#view')).forEach((el, i) => el.animate(
+    [{ opacity: 0, transform: `translateX(${dir * 22}px)`, filter: 'blur(4px)' }, { opacity: 1, transform: 'none', filter: 'none' }],
+    { duration: 440, delay: i * 45, easing: SYNC_EASE, fill: 'backwards' },
+  ));
+  $$('.sblock', $('#view')).slice(0, 30).forEach((el, i) => el.animate(
+    [{ opacity: 0, transform: 'translateY(8px) scale(.97)' }, { opacity: 1, transform: 'none' }],
+    { duration: 380, delay: 140 + i * 28, easing: SYNC_EASE, fill: 'backwards' },
+  ));
 }
 
 // Tabs: the day view, then each schedule with its days, then a way to add one.
@@ -3661,7 +3725,12 @@ document.addEventListener('click', (e) => {
     if (a === 'label-menu') { const r = act.getBoundingClientRect(); return openLabelMenu(act.dataset.name, r.left, r.bottom + 6, act); }
     if (a === 'sched-day') return setView({ type: 'schedule', id: act.dataset.day === t0() ? undefined : act.dataset.day });
     if (a === 'sched-add') return addBlocks();
-    if (a === 'sched-open') return setView({ type: 'schedule', id: act.dataset.id || undefined });
+    if (a === 'sched-open') {
+      const tabs = $$('.stab:not(.add)');
+      const on = $('.stab.on');
+      schedSwap = { from: on?.getBoundingClientRect(), dir: Math.sign(tabs.indexOf(act) - tabs.indexOf(on)) };
+      return setView({ type: 'schedule', id: act.dataset.id || undefined });
+    }
     if (a === 'sched-new') return newSchedule();
     if (a === 'tpl-day') return toggleScheduleDay(schedTarget().tpl, Number(act.dataset.d));
     if (a === 'tpl-delete') return deleteSchedule(schedTarget().tpl);
@@ -3696,7 +3765,11 @@ document.addEventListener('click', (e) => {
   }
 
   const layout = e.target.closest('[data-layout]');
-  if (layout) { store.set('layout:' + state.view.id, layout.dataset.layout); return renderView(); }
+  if (layout) {
+    if (layout.classList.contains('on')) return;
+    store.set('layout:' + state.view.id, layout.dataset.layout);
+    return morphLayout(renderView);
+  }
 
   const prio = e.target.closest('[data-prio]');
   if (prio) return setPriority(state.detailId, Number(prio.dataset.prio));

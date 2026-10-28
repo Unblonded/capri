@@ -319,6 +319,9 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 .stab.on .stab-days { color: inherit; opacity: .8; }
 .stab.add { color: var(--accent); border-style: dashed; background: transparent; }
 @media (hover: hover) { .stab:not(.on):hover { background: var(--hover); } }
+.stab { transition: background .25s, border-color .25s, color .25s; }
+.stab.on.gliding { background: var(--glass-inset); border-color: var(--glass-border); color: var(--text); transition: none; }
+.stab-glide { position: fixed; z-index: 30; pointer-events: none; box-sizing: border-box; border-radius: 99px; background: var(--accent-soft); border: 1px solid var(--accent); }
 .sched-hero { padding: 18px 20px; border-radius: 22px; display: grid; gap: 6px; }
 .sh-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .sh-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
