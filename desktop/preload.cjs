@@ -6,4 +6,6 @@ contextBridge.exposeInMainWorld('capriDesktop', {
   notify: (n) => ipcRenderer.send('capri:notify', n),
   openApp: () => ipcRenderer.send('capri:open'),
   widgetDone: () => ipcRenderer.send('capri:widget-done'),
+  widgetMenu: () => ipcRenderer.send('capri:widget-menu'),
+  widgetResize: (size) => ipcRenderer.send('capri:widget-resize', size),
 });

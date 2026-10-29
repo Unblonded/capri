@@ -1454,3 +1454,16 @@ html.widget-mode :is(.backdrop, #app, #connect, .toasts) { display: none !import
 .w-done { -webkit-app-region: no-drag; border: 0; border-radius: 99px; padding: 2px 12px; font-weight: 700; font-size: 12px; cursor: pointer;
   background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--on-accent, #fff); }
 :root[data-theme="capri"] .wcard.now .w-time { text-shadow: 2px 0 rgba(154, 77, 255, .7); }
+.wcard > * { zoom: var(--wz, 1); }
+.w-check { -webkit-app-region: no-drag; flex-shrink: 0; width: 17px; height: 17px; padding: 0; border-radius: 50%; border: 1.5px solid var(--muted);
+  background: none; color: transparent; display: grid; place-items: center; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+.w-check .ic { width: 11px; height: 11px; stroke-width: 3; }
+.w-check.p1 { border-color: var(--p1); } .w-check.p2 { border-color: var(--p2); } .w-check.p3 { border-color: var(--p3); }
+.w-check:hover { border-color: var(--accent); color: var(--accent); }
+.w-check.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); }
+.w-row.done .w-name { text-decoration: line-through; color: var(--muted); }
+.w-row.done .w-when { opacity: .45; }
+.w-grip { position: fixed; right: 7px; bottom: 7px; width: 16px; height: 16px; z-index: 2; cursor: nwse-resize; -webkit-app-region: no-drag;
+  opacity: 0; transition: opacity .15s; border-bottom-right-radius: 14px;
+  background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 58%, transparent 58%, transparent 70%, var(--muted) 70%, var(--muted) 78%, transparent 78%); }
+html.widget-mode body:hover .w-grip, .w-grip:active { opacity: .7; }

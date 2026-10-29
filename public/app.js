@@ -138,6 +138,7 @@ async function sync({ quiet = false, auto = false } = {}) {
     if (auto && fingerprint === lastSyncFingerprint) { state.lastSync = Date.now(); return; }
     const firstLoad = !lastSyncFingerprint;
     lastSyncFingerprint = fingerprint;
+    if (!firstLoad) store.set('changed', Date.now()); // the desktop widget reloads
     data.tasks = data.tasks.filter((x) => !pendingDeletes.has(x.id) && !pendingDeletes.has(x.parent_id));
     Object.assign(state, data, { drawings, deadlines, prefs, schedule, lastSync: Date.now() });
     loadDoneToday();
@@ -2247,6 +2248,7 @@ document.addEventListener('change', (e) => {
 // ---------- desktop widget and the pinned strip ----------
 // The desktop app's widget window loads Capri with ?widget=<kind> and shows one small card: what's on now,
 // today's tasks, the focus timer, or upcoming deadlines. With &move=1 (Mac) it can be dragged, then Done.
+// Its corner resizes it, a right-click opens its menu, and a tick on a task completes it.
 // The full window, pinned to the desktop, shows what's on now as a slim strip above the page.
 const widgetParams = new URLSearchParams(location.search);
 const WIDGET = widgetParams.has('widget') && (['now', 'today', 'focus', 'deadlines'].includes(widgetParams.get('widget')) ? widgetParams.get('widget') : 'now');
@@ -2263,6 +2265,12 @@ function nowParts() {
   return null;
 }
 
+const wDone = new Map(); // task id → timer: ticked off on the widget, still shown a moment so it can be unticked
+// As many 29px rows as the widget's height has room for, under its header (and a "+N more" line).
+const widgetRows = (more = false) => Math.max(1, Math.floor((innerHeight - 57 - (more ? 20 : 0)) / 29));
+const wCheck = (x, prio = '') => `<button class="w-check ${prio} ${wDone.has(x.id) ? 'on' : ''}" data-widget-check="${x.id}" title="${wDone.has(x.id) ? 'Undo' : 'Complete'}">${ic('check')}</button>`;
+const wRowClass = (x) => `w-row${wDone.has(x.id) ? ' done' : ''}`;
+
 const WIDGET_LABELS = { now: ['clock', 'Right now'], today: ['sun', 'Today'], focus: ['timer', 'Focus'], deadlines: ['flag', 'Deadlines'] };
 
 function widgetBody() {
@@ -2270,19 +2278,19 @@ function widgetBody() {
     const t = today();
     const list = sortTasks(openTasks().filter((x) => dueDay(x) && dueDay(x) <= t && !x.parent_id), 'smart');
     if (!list.length) return { body: `<div class="w-title">All clear</div><div class="w-left">Nothing due today.</div>` };
-    const shown = list.slice(0, 5);
+    const shown = list.slice(0, list.length > widgetRows() ? widgetRows(true) : list.length);
     return {
-      count: list.length,
-      body: `<div class="w-list">${shown.map((x) => `<div class="w-row"><span class="w-dot ${prioClass(x.priority)}"></span><span class="w-name">${esc(plain(x.content))}</span>${
+      count: list.length - wDone.size,
+      body: `<div class="w-list">${shown.map((x) => `<div class="${wRowClass(x)}">${wCheck(x, prioClass(x.priority))}<span class="w-name">${esc(plain(x.content))}</span>${
         dueDay(x) < t ? '<span class="w-when late">late</span>' : dueTime(x) ? `<span class="w-when">${esc(dueTime(x))}</span>` : ''}</div>`).join('')}</div>
         ${list.length > shown.length ? `<div class="w-next">+${list.length - shown.length} more</div>` : ''}`,
     };
   }
   if (WIDGET === 'deadlines') {
-    const list = openTasks().filter((x) => deadlineDay(x)).sort((a, b) => deadlineDay(a).localeCompare(deadlineDay(b))).slice(0, 4);
+    const list = openTasks().filter((x) => deadlineDay(x)).sort((a, b) => deadlineDay(a).localeCompare(deadlineDay(b))).slice(0, widgetRows());
     if (!list.length) return { body: `<div class="w-title">No deadlines</div><div class="w-left">Nothing with a deadline coming up.</div>` };
     return {
-      body: `<div class="w-list">${list.map((x) => `<div class="w-row"><span class="w-name">${esc(plain(x.content))}</span><span class="w-when ${dlClass(deadlineDay(x))}">${esc(countdown(deadlineDay(x)))}</span></div>`).join('')}</div>`,
+      body: `<div class="w-list">${list.map((x) => `<div class="${wRowClass(x)}">${wCheck(x)}<span class="w-name">${esc(plain(x.content))}</span><span class="w-when ${dlClass(deadlineDay(x))}">${esc(countdown(deadlineDay(x)))}</span></div>`).join('')}</div>`,
     };
   }
   if (WIDGET === 'focus') {
@@ -2316,6 +2324,9 @@ function renderWidget({ signedOut = false } = {}) {
   const open = window.capriDesktop?.openApp && !WIDGET_MOVE ? `<button class="w-open" data-widget-open title="Open Capri">${ic('external')}</button>` : '';
   const done = WIDGET_MOVE ? '<button class="w-done" data-widget-done>Done</button>' : '';
   el.className = `wcard w-${WIDGET} ${w.on ? 'now' : ''} ${WIDGET_MOVE ? 'moving' : ''}`;
+  // The clock and Right now cards grow with the widget; the lists show more rows instead.
+  const grow = WIDGET === 'now' || WIDGET === 'focus' ? Math.min(innerWidth / 300, innerHeight / 132) : 1;
+  el.style.setProperty('--wz', Math.min(3, Math.max(0.8, grow)).toFixed(3));
   const title = WIDGET_MOVE ? 'Drag to place' : esc(w.label || label);
   el.innerHTML = `<div class="w-top"><span class="w-label">${ic(icon)} ${title}${w.count && !WIDGET_MOVE ? ` <span class="w-count">${w.count}</span>` : ''}</span>${open}${done}</div>${w.body}`;
 }
@@ -2339,10 +2350,54 @@ async function bootWidget() {
   setInterval(renderWidget, WIDGET === 'focus' ? 1000 : 20000); // the timer ticks; the rest counts down by the minute
   setInterval(load, 2 * 60000); // changes made elsewhere
   addEventListener('storage', (e) => { if (e.key === 'tdp:timer') renderWidget(); }); // the app started, paused or reset the timer
+  addEventListener('storage', (e) => { if (e.key === 'tdp:changed') load(); }); // the app synced something new
   document.addEventListener('click', (e) => {
     if (e.target.closest('[data-widget-open]')) window.capriDesktop?.openApp?.();
     if (e.target.closest('[data-widget-done]')) window.capriDesktop?.widgetDone?.();
+    const check = e.target.closest('[data-widget-check]');
+    if (check) widgetCheck(check.dataset.widgetCheck, load);
   });
+  document.addEventListener('contextmenu', (e) => { e.preventDefault(); window.capriDesktop?.widgetMenu?.(); });
+  addEventListener('resize', () => renderWidget());
+  if (window.capriDesktop?.widgetResize && !WIDGET_MOVE) widgetGrip();
+}
+
+// Tick a task off on the widget. It stays a few seconds, ticked, so a second click can take it back; then
+// the widget reloads (a repeating task comes back with its next date) and the app is told to sync.
+async function widgetCheck(id, reload) {
+  if (wDone.has(id)) {
+    clearTimeout(wDone.get(id));
+    wDone.delete(id);
+    renderWidget();
+    try { await api('POST', `/api/tasks/${id}/reopen`); } catch { /* the next reload shows what Todoist has */ }
+    store.set('changed', Date.now());
+    return;
+  }
+  wDone.set(id, setTimeout(async () => { wDone.delete(id); await reload(); }, 4000));
+  renderWidget();
+  try { await api('POST', `/api/tasks/${id}/close`); store.set('changed', Date.now()); }
+  catch { clearTimeout(wDone.get(id)); wDone.delete(id); renderWidget(); }
+}
+
+// The resize grip in the widget's corner. The desktop app sizes the window as it's dragged.
+function widgetGrip() {
+  const grip = document.createElement('div');
+  grip.className = 'w-grip';
+  grip.title = 'Drag to resize';
+  document.body.append(grip);
+  let start = null;
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    start = { x: e.screenX, y: e.screenY, w: innerWidth, h: innerHeight };
+  });
+  grip.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    window.capriDesktop.widgetResize({ width: start.w + e.screenX - start.x, height: start.h + e.screenY - start.y });
+  });
+  const end = () => { start = null; };
+  grip.addEventListener('pointerup', end);
+  grip.addEventListener('pointercancel', end);
 }
 
 function updateNowStrip() {
@@ -2357,6 +2412,8 @@ function updateNowStrip() {
     ${p.next ? `<span class="ns-next">Next: ${esc(p.next.title)} · ${esc(fmtTime(p.next.start))}</span>` : ''}`;
 }
 addEventListener('capri-pinned', updateNowStrip);
+// A task ticked off on the desktop widget: catch up.
+addEventListener('storage', (e) => { if (e.key === 'tdp:changed' && !WIDGET && state.tasks.length) sync({ quiet: true, auto: true }); });
 setInterval(updateNowStrip, 20000);
 
 // ---------- focus view ----------
