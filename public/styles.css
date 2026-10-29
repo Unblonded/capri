@@ -1490,10 +1490,11 @@ html.widget-mode body:hover .w-grip, .w-grip:active { opacity: .7; }
 .wcard.accent-title :is(.w-title, .w-time, .w-left b) { color: var(--accent); }
 .wcard.light-title :is(.w-title, .w-time) { font-weight: 500; }
 .wcard.light-title .w-name { font-weight: 450; }
-.wcard[data-font="rounded"], [data-font="rounded"] { font-family: ui-rounded, "SF Pro Rounded", "Nunito", "Varela Round", system-ui, sans-serif; }
-.wcard[data-font="serif"], [data-font="serif"] { font-family: ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif; }
-.wcard[data-font="mono"], [data-font="mono"] { font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace; letter-spacing: -0.01em; }
-.wcard[data-font="system"], [data-font="system"] { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+/* Rounded, serif and mono come from Google Fonts (index.html), so Windows gets them too; only fetched once used. */
+.wcard[data-font="rounded"], [data-font="rounded"] { font-family: "Nunito", ui-rounded, system-ui, sans-serif; }
+.wcard[data-font="serif"], [data-font="serif"] { font-family: "Source Serif 4", ui-serif, Georgia, serif; }
+.wcard[data-font="mono"], [data-font="mono"] { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; letter-spacing: -0.02em; }
+.wcard[data-font="system"], [data-font="system"] { font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; }
 .wcard[data-align="center"] { text-align: center; }
 .wcard[data-align="center"] .w-clock { justify-content: center; }
 .w-top { gap: 8px; }
@@ -1504,7 +1505,7 @@ html.widget-mode body:hover .w-grip, .w-grip:active { opacity: .7; }
 /* ---- Widget studio (desktop app) ---- */
 .wstudio { padding: 5vh 16px 16px; align-items: flex-start; }
 .ws-card { max-width: 980px; height: min(760px, 90vh); display: flex; flex-direction: column; padding: 0;
-  background: color-mix(in srgb, var(--bg) 95%, transparent); border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--bg) 98.5%, transparent); border: 1px solid var(--glass-border);
   -webkit-backdrop-filter: blur(30px) saturate(1.4); backdrop-filter: blur(30px) saturate(1.4); box-shadow: 0 30px 80px rgba(0, 0, 0, .28); }
 .ws-head { display: flex; align-items: center; gap: 12px; padding: 16px 18px 10px; }
 .ws-head > div { flex: 1; min-width: 0; }
@@ -1624,3 +1625,29 @@ html.widget-mode body:hover .w-grip, .w-grip:active { opacity: .7; }
   .ws-right { overflow: visible; }
 }
 .ws-switch-row[hidden] { display: none; }
+
+/* Polish: smooth changes, a ticked task sliding away, the studio opening and closing */
+.wcard { transition: background .3s ease, border-color .3s ease, border-radius .25s ease, box-shadow .3s ease, padding .2s ease; }
+.w-row { transition: opacity .25s ease, transform .25s ease, height .26s ease, margin .26s ease; }
+.w-row.leaving { opacity: 0; transform: translateX(14px); height: 0; margin-top: -3px; overflow: hidden; }
+.w-check { flex-shrink: 0; }
+.w-check.on .ic { animation: w-tick .3s var(--spring, ease); }
+@keyframes w-tick { from { transform: scale(.3); opacity: 0; } }
+.ws-frame .wcard { transition: background .3s ease, border-color .3s ease, border-radius .25s ease, box-shadow .3s ease; }
+.ws-frame { transition: opacity .2s ease, filter .2s ease; }
+.ws-frame.off { opacity: .55; filter: grayscale(.5); }
+.wstudio .ws-card { animation: ws-in .32s var(--spring, cubic-bezier(.2, .9, .3, 1.2)); }
+@keyframes ws-in { from { transform: translateY(14px) scale(.97); opacity: 0; } }
+.wstudio.closing { animation: ws-fade-out .18s ease forwards; }
+.wstudio.closing .ws-card { animation: ws-out .18s ease forwards; }
+@keyframes ws-fade-out { to { opacity: 0; } }
+@keyframes ws-out { to { transform: translateY(8px) scale(.98); opacity: 0; } }
+.ws-addmenu { animation: menu-in .2s var(--ease-out, ease); }
+.ws-card :is(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ws-seg button:focus-visible, .ws-tab:focus-visible { outline-offset: 0; }
+.ws-tab:not(.shown) span { opacity: .7; }
+.ws-preset .ws-pv { transition: transform .15s ease; }
+.ws-preset:hover .ws-pv { transform: translateY(-1px); }
+@media (prefers-reduced-motion: reduce) {
+  .wcard, .w-row, .ws-frame, .ws-frame .wcard, .wstudio .ws-card, .wstudio.closing, .wstudio.closing .ws-card { transition: none; animation: none; }
+}

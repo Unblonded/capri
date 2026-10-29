@@ -146,6 +146,7 @@ function widgetBounds(w) {
 
 // Moving one from here (a corner, a new size, a screen change) isn't the user dragging it somewhere.
 const placedAt = new Map();
+const moveSaves = new Map();
 function setWidgetBounds(id, bounds) {
   const bw = widgetWins.get(id);
   if (!bw) return;
@@ -179,9 +180,14 @@ function createWidget(w) {
   bw.on('focus', () => { if (!IS_MAC && widgetLayer(w) === 'desktop') desktopPin.sendToBack(bw); });
   bw.on('moved', () => {
     if (Date.now() - (placedAt.get(w.id) || 0) < 600) return;
-    const [x, y] = bw.getPosition();
-    updateWidget(w.id, { pos: { x, y } });
-    widgetChanged();
+    clearTimeout(moveSaves.get(w.id)); // saved once it settles
+    moveSaves.set(w.id, setTimeout(() => {
+      if (bw.isDestroyed()) return;
+      const [x, y] = bw.getPosition();
+      updateWidget(w.id, { pos: { x, y } });
+      placeAll(); // the ones it left in a corner close the gap
+      widgetChanged();
+    }, 250));
   });
   bw.on('minimize', () => bw.restore());
   // Right-clicking where the card drags gives Windows' own window menu; show the widget's instead.
@@ -196,7 +202,6 @@ function rebuildWidget(id) {
   const w = widgetById(id);
   if (w?.on) createWidget(w);
 }
-const rebuildAll = () => { for (const w of widgetList()) rebuildWidget(w.id); };
 
 // What Capri's widget settings show. Capri is told whenever something changes from anywhere.
 function widgetState() {
@@ -227,11 +232,26 @@ function setWidgetKind(id, kind) {
   placeAll();
   widgetChanged();
 }
+// Puts an open widget on its layer without reloading it. Only a Mac desktop-level window has to be made
+// again, since a window can't change to or from that type.
+function applyLayer(id) {
+  const w = widgetById(id);
+  const bw = widgetWins.get(id);
+  if (!w || !bw) return;
+  const layer = widgetLayer(w);
+  if (!IS_MAC) {
+    if (layer === 'desktop') { bw.setAlwaysOnTop(false); desktopPin.pin(bw); } else desktopPin.unpin(bw);
+  }
+  bw.setAlwaysOnTop(layer === 'top', 'floating');
+  if (IS_MAC) bw.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: layer === 'top' });
+}
+const macDesktopWindow = (id) => IS_MAC && widgetWins.get(id) && !widgetWins.get(id).isFocusable();
 function setWidgetLayer(id, layer) {
   if (!WIDGET_LAYERS.some(([l]) => l === layer)) return;
   updateWidget(id, { layer });
   widgetMoving.delete(id);
-  rebuildWidget(id);
+  if (macDesktopWindow(id) || (IS_MAC && layer === 'desktop' && !widgetPeek)) rebuildWidget(id);
+  else applyLayer(id);
   widgetChanged();
 }
 function placeWidget(id, corner) {
@@ -292,7 +312,11 @@ function removeWidget(id) {
 function setWidgetPeek(on) {
   if (widgetPeek === on) return;
   widgetPeek = on;
-  rebuildAll();
+  for (const w of widgetList()) {
+    if (!widgetWins.has(w.id)) continue;
+    const desktopType = IS_MAC && (w.layer || 'desktop') === 'desktop' && !widgetMoving.has(w.id);
+    if (desktopType) rebuildWidget(w.id); else applyLayer(w.id);
+  }
 }
 function openWidgetStudio(id) {
   showWindow();
@@ -330,14 +354,20 @@ function popupWidgetMenu(id) {
     { label: 'Hide this widget', click: () => setWidgetOn(id, false) },
   ]).popup({ window: bw, callback: () => setTimeout(() => tray?.setContextMenu(buildTrayMenu()), 100) }); // ticks match on the Mac menu bar
 }
+// Its own title, or its kind, numbered when there are two of a kind ("Today’s tasks 2").
+function widgetLabel(w, list = widgetList()) {
+  if (w.title) return w.title;
+  const same = list.filter((o) => o.kind === w.kind && !o.title);
+  const name = WIDGET_KINDS.find(([k]) => k === w.kind)?.[1] || w.kind;
+  return same.length > 1 ? `${name} ${same.indexOf(w) + 1}` : name;
+}
 function widgetTrayItems() {
   const list = widgetList();
-  const kindName = (k) => WIDGET_KINDS.find(([id]) => id === k)?.[1] || k;
   return [{
     label: 'Desktop widgets', enabled: Boolean(config.serverUrl),
     submenu: [
-      ...list.map((w, i) => ({
-        label: `${kindName(w.kind)}${list.filter((o) => o.kind === w.kind).length > 1 ? ` ${i + 1}` : ''}`,
+      ...list.map((w) => ({
+        label: widgetLabel(w, list),
         submenu: [{ label: 'Show', type: 'checkbox', checked: Boolean(w.on), click: (item) => setWidgetOn(w.id, item.checked) }, { type: 'separator' }, ...widgetMenuItems(w.id),
           { type: 'separator' }, { label: 'Remove', click: () => removeWidget(w.id) }],
       })),
@@ -372,6 +402,7 @@ ipcMain.handle('capri:widget-update', (e, id, changes = {}) => {
   if (changes.size === 'reset') resetWidgetSize(id);
   else if (changes.size) resizeWidget(id, changes.size, { now: true });
   if (changes.move && IS_MAC && widgetById(id).on) moveWidget(id);
+  if (typeof changes.title === 'string') { updateWidget(id, { title: changes.title.trim().slice(0, 40) }); widgetChanged(); }
   if (changes.reload) widgetWins.get(id)?.webContents.reload();
   return widgetState();
 });

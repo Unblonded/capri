@@ -955,7 +955,7 @@ document.addEventListener('contextmenu', (e) => {
 });
 document.addEventListener('pointerdown', (e) => {
   if (!ctxMenu || ctxMenu.contains(e.target)) return;
-  if (ctxMenu.classList.contains('remind-menu') && e.target.closest('#remind-btn, #widget-btn')) return; // the bell and widget buttons toggle their own menus
+  if (ctxMenu.classList.contains('remind-menu') && e.target.closest('#remind-btn')) return; // the bell toggles its own menu
   closeTaskMenu();
 }, true);
 document.addEventListener('keydown', (e) => {
@@ -2451,7 +2451,12 @@ async function widgetCheck(id, reload) {
     store.set('changed', Date.now());
     return;
   }
-  wDone.set(id, setTimeout(async () => { wDone.delete(id); await reload(); }, 4000));
+  wDone.set(id, setTimeout(async () => {
+    $(`[data-widget-check="${id}"]`)?.closest('.w-row')?.classList.add('leaving');
+    await new Promise((r) => setTimeout(r, 260));
+    wDone.delete(id);
+    await reload();
+  }, 4000));
   renderWidget();
   try { await api('POST', `/api/tasks/${id}/close`); store.set('changed', Date.now()); }
   catch { clearTimeout(wDone.get(id)); wDone.delete(id); renderWidget(); }
@@ -2614,18 +2619,35 @@ function studioPreview() {
   const scale = Math.min(1, (stage.clientWidth - 32) / width, (stage.clientHeight - 44) / height);
   Object.assign(frame.style, { width: `${width}px`, height: `${height}px`, transform: `translate(-50%, -50%) scale(${scale})` });
   paintWidget($('.wcard', frame), { kind: w.kind, id: w.id, st: widgetStyle(w.id), width, height, move: false, live: false });
-  $('.ws-size', stage).textContent = `${width} × ${height}${scale < 1 ? ` · shown at ${Math.round(scale * 100)}%` : ''}`;
+  frame.classList.toggle('off', !w.on);
+  $('.ws-size', stage).textContent = `${w.on ? '' : 'Hidden · '}${width} × ${height}${scale < 1 ? ` · shown at ${Math.round(scale * 100)}%` : ''}`;
 }
 
 function renderStudio() {
   const root = $('#wstudio');
   if (!root || !studio.state) return;
   if (!studioWidget()) studio.id = studio.state.widgets[0]?.id || null;
+  // Redrawn while you type (a widget was dragged, say): put the cursor back where it was.
+  // Any redraw keeps focus on the same control (found again by its data- attributes).
+  const active = document.activeElement;
+  const attrs = root.contains(active) ? [...active.attributes].filter((a) => a.name.startsWith('data-') && !['data-font', 'data-wall', 'data-theme-hint', 'data-bg'].includes(a.name)) : [];
+  const keep = attrs.length ? {
+    sel: attrs.map((a) => `[${a.name}="${CSS.escape(a.value)}"]`).join(''),
+    typing: active.matches('input[data-ws-text], input[data-ws-dim]'), value: active.value, start: active.selectionStart, end: active.selectionEnd,
+  } : null;
   $('.ws-tabs', root).innerHTML = studioTabsHtml();
   const right = $('.ws-right', root);
-  const scroll = right.scrollTop;
+  const scroll = studio.shownId === studio.id ? right.scrollTop : 0; // a different widget starts at the top
+  studio.shownId = studio.id;
   right.innerHTML = studioSettingsHtml();
   right.scrollTop = scroll;
+  if (keep) {
+    const el = $(keep.sel, root);
+    if (el) {
+      el.focus({ preventScroll: true });
+      if (keep.typing) { el.value = keep.value; try { el.setSelectionRange(keep.start, keep.end); } catch { /* number inputs */ } }
+    }
+  }
   $('.ws-walls', root).innerHTML = WIDGET_WALLS.map(([id, name]) => `<button class="ws-wall ${studio.wall === id ? 'on' : ''}" data-ws-wall="${id}" data-wall="${id}" title="${name}"></button>`).join('');
   const peek = $('[data-ws-peek]', root);
   peek.closest('label').hidden = !!studio.state.legacy;
@@ -2655,7 +2677,7 @@ async function openWidgetStudio(id = null) {
     const root = document.createElement('div');
     root.id = 'wstudio';
     root.className = 'modal wstudio';
-    root.innerHTML = `<div class="modal-card ws-card" role="dialog" aria-label="Desktop widgets">
+    root.innerHTML = `<div class="modal-card ws-card" role="dialog" aria-modal="true" aria-label="Desktop widgets">
       <header class="ws-head"><span class="ws-logo">${ic('widget')}</span><div><h3>Desktop widgets</h3><p>Everything here changes your widgets as you pick.</p></div>
         <button class="icon-btn" data-ws-close title="Close (Esc)">${ic('close')}</button></header>
       <nav class="ws-tabs"></nav>
@@ -2672,21 +2694,49 @@ async function openWidgetStudio(id = null) {
     root.addEventListener('input', studioInput);
     root.addEventListener('change', studioChange);
     root.addEventListener('pointerdown', (e) => { if (e.target === root) closeWidgetStudio(); });
+    addEventListener('keydown', studioKey, true); // on window, ahead of the app's own shortcuts on document
+    studio.returnFocus = document.activeElement;
   }
+  const wasOpen = studio.open;
   studio.open = true;
   renderStudio();
+  if (!wasOpen) $('.ws-tab.on, [data-ws-close]', $('#wstudio'))?.focus({ preventScroll: true });
   if (studio.peek) setPeek(true);
 }
 
 function closeWidgetStudio() {
-  $('#wstudio')?.remove();
-  if (studio.open && studio.peek) setPeek(false);
+  const root = $('#wstudio');
+  if (!root || root.classList.contains('closing')) return;
+  root.classList.add('closing');
+  setTimeout(() => root.remove(), 180);
+  removeEventListener('keydown', studioKey, true);
+  if (studio.peek) setPeek(false);
   studio.open = false;
   studio.add = false;
+  studio.returnFocus?.focus?.({ preventScroll: true });
+}
+
+// Keys stay in the studio (Q doesn't start a task behind it); Esc closes the add menu, then the studio;
+// Tab cycles through the studio's own controls.
+function studioKey(e) {
+  if (e.target.closest?.('.modal') && !e.target.closest('#wstudio')) return; // a dialog on top of it (Remove widget?) has the keys
+  e.stopPropagation();
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    if (studio.add) { studio.add = false; renderStudio(); $('[data-ws-add]', $('#wstudio'))?.focus(); return; }
+    return closeWidgetStudio();
+  }
+  if (e.key === 'Enter' && e.target.matches('input[data-ws-text], input[data-ws-dim]')) { e.target.blur(); return; }
+  if (e.key !== 'Tab') return;
+  const items = $$('button, input, [tabindex="0"]', $('#wstudio .ws-card')).filter((el) => !el.disabled && el.offsetParent && el.tabIndex !== -1);
+  const i = items.indexOf(document.activeElement);
+  if (e.shiftKey && i <= 0) { e.preventDefault(); items.at(-1)?.focus(); }
+  else if (!e.shiftKey && i === items.length - 1) { e.preventDefault(); items[0]?.focus(); }
 }
 
 function studioClick(e) {
   const t = (sel) => e.target.closest(sel);
+  if (studio.add && !t('.ws-addwrap')) { studio.add = false; renderStudio(); }
   if (t('[data-ws-close]')) return closeWidgetStudio();
   if (t('[data-ws-tab]')) { studio.id = t('[data-ws-tab]').dataset.wsTab; studio.add = false; return renderStudio(); }
   if (t('[data-ws-add]')) { studio.add = !studio.add; return renderStudio(); }
@@ -2758,6 +2808,7 @@ function studioChange(e) {
   if (el.matches('[data-ws-on]')) return studioUpdate({ on: el.checked });
   if (el.matches('[data-ws-peek]')) { studio.peek = el.checked; store.set('widgetPeek', el.checked); return setPeek(el.checked); }
   if (el.matches('[data-ws-flag]')) return studioStyle({ [el.dataset.wsFlag]: el.checked });
+  if (el.matches('[data-ws-text]') && deskWidgets.multi) return studioUpdate({ title: el.value.trim() }); // names it in the tray menu too
   if (el.matches('[data-ws-text]') || el.matches('[data-ws-color]')) return renderStudio();
   if (el.matches('[data-ws-dim]')) {
     const w = studioWidget();
@@ -2782,7 +2833,6 @@ function setupWidgetButton() {
     if (studio.open) { studio.state = s; renderStudio(); }
   });
   window.capriDesktop.onOpenWidgetStudio?.((id) => openWidgetStudio(id));
-  addEventListener('keydown', (e) => { if (e.key === 'Escape' && studio.open && !e.defaultPrevented) closeWidgetStudio(); });
   addEventListener('resize', () => { if (studio.open) studioPreview(); });
   setInterval(() => { if (studio.open) studioPreview(); }, 1000); // the focus timer and clocks tick in the preview too
   document.addEventListener('visibilitychange', () => { if (studio.open && studio.peek && !document.hidden) setPeek(true); });
@@ -5182,7 +5232,7 @@ $('#theme-btn').addEventListener('click', toggleTheme);
 $('#refresh-btn').addEventListener('click', () => sync());
 $('#add-project').addEventListener('click', createProject);
 $('#add-label').addEventListener('click', () => createLabel());
-$('#remind-btn').addEventListener('click', (e) => { e.stopPropagation(); if (ctxMenu?.classList.contains('remind-menu') && !ctxMenu.classList.contains('widget-menu')) closeTaskMenu(); else openRemindMenu(); });
+$('#remind-btn').addEventListener('click', (e) => { e.stopPropagation(); if (ctxMenu?.classList.contains('remind-menu')) closeTaskMenu(); else openRemindMenu(); });
 setupWidgetButton();
 $('#menu-btn').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
 // Phone: tapping anywhere outside the sidebar, or picking something in it, closes it.
