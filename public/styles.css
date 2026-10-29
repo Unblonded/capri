@@ -258,6 +258,13 @@ select option, select optgroup { background-color: var(--menu-bg); color: var(--
 #view-sub { font-size: 13px; margin-top: 2px; }
 .head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .menu-btn { display: none; }
+/* Offline, or changes made offline still waiting to send. */
+.net-pill { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; border: 1px solid var(--glass-border); background: var(--glass-inset);
+  color: inherit; border-radius: 999px; padding: 5px 11px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.net-pill .ic { width: 14px; height: 14px; opacity: .75; }
+.net-pill.busy .ic { animation: net-spin 1s linear infinite; }
+@keyframes net-spin { to { transform: rotate(360deg); } }
+@media (max-width: 520px) { .net-pill span { display: none; } }
 /* Today's progress: one segment per task due today, filled as they're done. */
 .day-progress { display: flex; align-items: center; gap: 10px; margin-top: 8px; max-width: 420px; }
 .dp-track { flex: 1; display: flex; gap: 3px; height: 6px; min-width: 60px; }

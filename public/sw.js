@@ -1,7 +1,7 @@
 // Capri's offline cache. The app itself (page, script, styles, icons, fonts) is served from the cache
 // straight away and refreshed in the background, so the home-screen app opens instantly. Your tasks
 // come from the network when it answers quickly, otherwise from the last copy saved on this device.
-const SHELL = 'capri-shell-v2';
+const SHELL = 'capri-shell-v3';
 const FONTS = 'capri-fonts-v1';
 const DATA = 'capri-data-v1';
 const SHELL_FILES = ['/', '/app.js', '/styles.css', '/manifest.webmanifest', '/icons/apple-touch-icon.png', '/icons/icon-192.png'];
@@ -80,12 +80,20 @@ async function networkFirst(req) {
   try {
     const first = await Promise.race([network, slow]);
     if (first) return first;
-    return (await cache.match(req)) || (await network);
+    const hit = await cache.match(req);
+    return hit ? saved(hit) : await network;
   } catch {
     const hit = await cache.match(req);
-    if (hit) return hit;
-    return new Response(JSON.stringify({ error: "You're offline" }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+    if (hit) return saved(hit);
+    return new Response(JSON.stringify({ error: "You're offline" }), { status: 503, headers: { 'Content-Type': 'application/json', 'X-Capri-Offline': '1' } });
   }
+}
+
+// An old answer handed out because the server didn't: marked, so the page knows it's offline.
+function saved(res) {
+  const headers = new Headers(res.headers);
+  headers.set('X-Capri-Offline', '1');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
 // A new version of Capri finished downloading: tell open windows (once per update).

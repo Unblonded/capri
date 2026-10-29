@@ -35,6 +35,7 @@ const ICONS = {
   subtask: '<path d="M6 3v11a3 3 0 0 0 3 3h10"/><path d="M15.5 13.5L19 17l-3.5 3.5"/>',
   inbox: '<path d="M3 13l2.6-8.2A2.5 2.5 0 0 1 8 3h8a2.5 2.5 0 0 1 2.4 1.8L21 13v5a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z"/><path d="M3 13h5l1.5 3h5l1.5-3h5"/>',
   board: '<rect x="3" y="3.5" width="5" height="17" rx="1.8"/><rect x="9.5" y="3.5" width="5" height="11" rx="1.8"/><rect x="16" y="3.5" width="5" height="14" rx="1.8"/>',
+  cloudOff: '<path d="M7.5 18.5H17a4 4 0 0 0 1.3-7.8A6 6 0 0 0 7.2 8.6 5 5 0 0 0 7.5 18.5z"/><path d="M3 3l18 18"/>',
   more: '<circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/>',
   widget: '<rect x="3" y="4" width="18" height="16" rx="3.5"/><path d="M7 9.5h6M7 13.5h10"/>',
   grid: '<rect x="3" y="3" width="7.5" height="7.5" rx="2.2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2.2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2.2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2.2"/>',
@@ -107,6 +108,8 @@ const writes = { pending: 0, seq: 0 };
 
 async function api(method, url, body) {
   const write = method !== 'GET';
+  // Offline, or older changes still waiting to go out (this one has to go after them): it waits too.
+  if (write && canQueue(method, url) && (net.offline || outbox().length)) return queueWrite(method, url, body);
   if (write) { writes.pending++; writes.seq++; }
   let res;
   try {
@@ -115,10 +118,22 @@ async function api(method, url, body) {
       headers: body ? { 'Content-Type': 'application/json' } : {},
       body: body ? JSON.stringify(body) : undefined,
     });
+  } catch (err) {
+    res = null;
+    if (!(err instanceof TypeError)) throw err;
   } finally {
     if (write) writes.pending--;
   }
+  if (!res || unreachable(res)) {
+    setOffline(true);
+    if (write && canQueue(method, url)) return queueWrite(method, url, body);
+    const saved = !write && OFFLINE_GETS.test(url) && store.get('get:' + url, null);
+    if (saved) return saved;
+    throw new Error(write ? 'That needs a connection, and you’re offline' : 'You’re offline');
+  }
+  setOffline(false);
   const data = await res.json().catch(() => ({}));
+  if (res.ok && !write && OFFLINE_GETS.test(url) && !WIDGET) store.set('get:' + url, data);
   if (res.status === 401 && url !== '/api/connect') {
     showConnect({ expired: data.expired });
     throw new Error(data.error || 'Not connected');
@@ -127,8 +142,212 @@ async function api(method, url, body) {
   return data;
 }
 
+// ---------- offline ----------
+// With no connection Capri keeps working from the copy saved on this device. Changes wait in an outbox
+// (in localStorage, so they survive closing the app, and the desktop widgets add to the same one) and go
+// out in order once the server answers again. Things made offline get a stand-in id ("tmp_…"), swapped
+// for the real one as they're sent.
+
+// Whether you're signed in, kept for opening Capri offline. The list itself comes from the snapshot below.
+const OFFLINE_GETS = /^\/api\/status$/;
+// Signing in and out, reminders on this device and drawing uploads (too big to keep) need the server there and then.
+const canQueue = (method, url) => !/^\/api\/(connect|disconnect|push)\b/.test(url) && !(method === 'POST' && url === '/api/drawings');
+// No answer from Capri's server itself: Cloudflare's own error pages when the server PC is off, or the
+// service worker saying there's no connection. Capri's server always answers in JSON.
+const unreachable = (res) => res.headers.get('X-Capri-Offline') === '1'
+  || ([502, 503, 504, 520, 521, 522, 523, 530].includes(res.status) && !/json/.test(res.headers.get('Content-Type') || ''));
+
+const net = { offline: navigator.onLine === false, flushing: false };
+const outbox = () => store.get('outbox', []);
+const tmpId = () => 'tmp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const isTmp = (id) => typeof id === 'string' && id.startsWith('tmp_');
+
+function setOffline(on) {
+  if (net.offline === on) return;
+  net.offline = on;
+  renderNet();
+  if (!on) setTimeout(flushOutbox, 0);
+}
+
+function queueWrite(method, url, body) {
+  const reply = offlineReply(method, url, body);
+  const list = outbox();
+  // Remember the stand-in id of something this makes, to swap for the real one once it's sent.
+  const made = reply?.id && isTmp(reply.id) && !url.includes(reply.id);
+  list.push({ method, url, body, id: made ? reply.id : undefined });
+  store.set('outbox', list);
+  writes.seq++;
+  // The caller puts the change into the list once this returns; save the list after that.
+  setTimeout(saveSnapshot, 0);
+  if (!net.offline) setTimeout(flushOutbox, 50);
+  renderNet();
+  return Promise.resolve(reply);
+}
+
+// What the server would have answered, near enough, so the change shows straight away.
+function offlineReply(method, url, body = {}) {
+  const [, kind, id, action] = url.split('?')[0].match(/^\/api\/([a-z]+)(?:\/([^/]+))?(?:\/([a-z]+))?/) || [];
+  if (method === 'DELETE' || action) return {};
+  if (kind === 'tasks' && id === 'quick') return { ...newTask(), ...quickFields(body.text || '') };
+  if (kind === 'tasks' && !id) return { ...newTask(), ...taskFields({}, body) };
+  if (kind === 'tasks') return taskFields(taskById(id) || { id }, body);
+  if (kind === 'projects' && !id) return { id: tmpId(), name: body.name, color: 'charcoal', parent_id: null, child_order: 9999, ...body };
+  if (kind === 'sections' && !id) return { id: tmpId(), section_order: 9999, ...body };
+  if (kind === 'labels' && !id) return { id: tmpId(), item_order: 9999, ...body };
+  if (kind === 'labels' || kind === 'sections') return { ...[...state.labels, ...state.sections].find((x) => x.id === id), ...body };
+  if (kind === 'schedule') return { ...state.schedule };
+  if (kind === 'drawings') return { ...state.drawings.find((d) => d.id === id), ...body };
+  return { ok: true };
+}
+
+function newTask() {
+  return {
+    id: tmpId(), content: '', description: '', project_id: inbox()?.id, section_id: null, parent_id: null,
+    labels: [], priority: 1, due: null, checked: false, child_order: 9999, note_count: 0, added_at: new Date().toISOString(),
+  };
+}
+
+// The fields of a task change, worked out here instead of by Todoist. Dates in words ("tmr", "fri") are
+// read with Capri's own parser; ones it can't read show once the change reaches Todoist.
+function taskFields(t, body) {
+  const out = { ...t };
+  for (const k of ['content', 'description', 'priority', 'labels', 'project_id', 'section_id', 'parent_id']) if (k in body) out[k] = body[k];
+  if ('due_date' in body) out.due = body.due_date ? { date: body.due_date, string: body.due_date, is_recurring: false } : null;
+  if (body.due_datetime) {
+    const d = new Date(body.due_datetime);
+    out.due = { date: `${ymd(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`, string: body.due_datetime, is_recurring: false };
+  }
+  if (body.due_string) {
+    const s = body.due_string.trim();
+    if (/^no (due )?date$/i.test(s)) out.due = null;
+    else if (isRepeatString(s)) out.due = { ...(out.due || { date: today() }), string: s, is_recurring: true };
+    else { const day = parseDate(s); if (day) out.due = { date: day, string: s, is_recurring: false }; }
+  }
+  return out;
+}
+
+// Quick add's #project, @label and p1–p4, which Todoist reads for real once it's sent.
+function quickFields(text) {
+  const out = { labels: [] };
+  const squash = (s) => s.toLowerCase().replace(/[\s_-]+/g, '');
+  const content = text.replace(/(^|\s)([#@])(\S+)/g, (m, sp, sign, name) => {
+    if (sign === '@') { out.labels.push(name); return sp; }
+    const p = state.projects.find((x) => squash(x.name) === squash(name));
+    if (p) { out.project_id = p.id; return sp; }
+    return m;
+  }).replace(/(^|\s)p([1-4])(?=\s|$)/i, (m, sp, n) => { out.priority = 5 - Number(n); return sp; });
+  const every = content.match(/\bevery\b.*$/i);
+  if (every) out.due = { date: today(), string: every[0].trim(), is_recurring: true };
+  out.content = content.replace(/\s+/g, ' ').trim();
+  return out;
+}
+
+// Sends the waiting changes, oldest first. Stops at the first one that can't get through (still offline);
+// one the server turns down (say, a task deleted on another device) is dropped and you're told.
+async function flushOutbox() {
+  if (net.flushing || WIDGET || !outbox().length) return;
+  // Two Capri windows open: only one sends.
+  const lock = store.get('outboxLock', 0);
+  if (Date.now() - lock < 30000) return;
+  net.flushing = true;
+  renderNet();
+  let sent = 0;
+  const failed = [];
+  try {
+    for (;;) {
+      store.set('outboxLock', Date.now());
+      const [job] = outbox();
+      if (!job) break;
+      let res;
+      try {
+        res = await fetch(job.url, {
+          method: job.method,
+          headers: job.body ? { 'Content-Type': 'application/json' } : {},
+          body: job.body ? JSON.stringify(job.body) : undefined,
+        });
+      } catch { res = null; }
+      if (!res || unreachable(res)) { net.offline = true; break; }
+      net.offline = false;
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) { showConnect({ expired: data.expired }); break; }
+      const rest = outbox().slice(1);
+      if (!res.ok) failed.push(data.error || `Request failed (${res.status})`);
+      else if (job.id && data.id) swapId(job.id, String(data.id), rest);
+      // A change to something whose creation failed can't go anywhere either.
+      store.set('outbox', !res.ok && job.id ? rest.filter((j) => !JSON.stringify(j).includes(job.id)) : rest);
+      sent++;
+    }
+  } finally {
+    store.set('outboxLock', 0);
+    net.flushing = false;
+    renderNet();
+  }
+  if (failed.length) toast(failed.length === 1 ? `A change made offline didn’t go through: ${failed[0]}` : `${failed.length} changes made offline didn’t go through`);
+  if (sent && !outbox().length) {
+    store.set('changed', Date.now());
+    toast(`Synced ${sent} change${sent === 1 ? '' : 's'} made offline`);
+    sync({ quiet: true });
+  }
+}
+
+// Something made offline has its real id now: use it in the changes still waiting and on screen.
+function swapId(tmp, real, rest) {
+  const swap = (v) => JSON.parse(JSON.stringify(v).split(tmp).join(real));
+  rest.forEach((j, i) => { rest[i] = swap(j); });
+  for (const k of ['tasks', 'projects', 'sections', 'labels', 'deadlines', 'view']) state[k] = swap(state[k]);
+  for (const k of ['selectedId', 'detailId']) if (state[k] === tmp) state[k] = real;
+  if (location.hash.includes(tmp)) history.replaceState(null, '', location.hash.split(tmp).join(real));
+  saveSnapshot();
+}
+
+// The list as it stands on this device, offline changes included, so Capri opens with it with no connection.
+const SNAPSHOT_KEYS = ['projects', 'sections', 'labels', 'tasks', 'drawings', 'deadlines', 'prefs', 'schedule'];
+function saveSnapshot() {
+  if (WIDGET || !state.lastSync) return;
+  const snap = {};
+  for (const k of SNAPSHOT_KEYS) snap[k] = state[k];
+  store.set('snapshot', snap);
+}
+function loadSnapshot() {
+  const snap = store.get('snapshot', null);
+  if (!snap) return false;
+  Object.assign(state, snap, { lastSync: Date.now() });
+  return true;
+}
+addEventListener('pagehide', saveSnapshot);
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveSnapshot(); });
+addEventListener('online', () => { setOffline(false); flushOutbox(); });
+addEventListener('offline', () => setOffline(true));
+setInterval(() => { if (outbox().length && !document.hidden) flushOutbox(); }, 15000);
+// The widgets add to the outbox too.
+addEventListener('storage', (e) => { if (e.key === 'tdp:outbox') renderNet(); });
+
+// The pill by the title: offline, changes waiting, or sending them.
+function renderNet() {
+  const pill = document.getElementById('net-pill');
+  if (!pill) return;
+  const waiting = outbox().length;
+  pill.classList.toggle('hidden', !net.offline && !waiting);
+  pill.classList.toggle('busy', net.flushing);
+  pill.innerHTML = `${ic(net.flushing ? 'sync' : 'cloudOff')}<span>${net.flushing ? 'Syncing…' : net.offline ? 'Offline' : 'Not synced'}${
+    waiting ? ` · ${waiting} change${waiting === 1 ? '' : 's'}` : ''}</span>`;
+  pill.title = net.offline
+    ? `No connection to Capri's server. ${waiting ? 'Your changes are saved on this device and sync when you’re back online.' : 'Changes you make are saved here and sync later.'} Tap to try now.`
+    : 'Tap to send your changes now';
+}
+
 let lastSyncFingerprint = '';
 async function sync({ quiet = false, auto = false } = {}) {
+  // Waiting changes go first; the server's copy would otherwise undo them on screen.
+  if (outbox().length) {
+    await flushOutbox();
+    if (outbox().length) {
+      const firstLoad = !lastSyncFingerprint && !state.tasks.length;
+      if (firstLoad && loadSnapshot()) { render(); lastSyncFingerprint = 'offline'; }
+      if (!quiet) toast(net.offline ? 'You’re offline. Your changes sync when you’re back' : 'Your changes are still sending');
+      return;
+    }
+  }
   const seq = writes.seq;
   try {
     const [data, { drawings }, deadlines, prefs, schedule] = await Promise.all([
@@ -143,6 +362,7 @@ async function sync({ quiet = false, auto = false } = {}) {
     if (!firstLoad) store.set('changed', Date.now()); // the desktop widget reloads
     data.tasks = data.tasks.filter((x) => !pendingDeletes.has(x.id) && !pendingDeletes.has(x.parent_id));
     Object.assign(state, data, { drawings, deadlines, prefs, schedule, lastSync: Date.now() });
+    saveSnapshot();
     loadDoneToday();
     sendPlan();
     const before = taskRowsOnScreen();
@@ -152,6 +372,8 @@ async function sync({ quiet = false, auto = false } = {}) {
     if (!quiet) toast('Synced with Todoist');
     migrateDeadlines();
   } catch (err) {
+    // Opened with no connection: show the list as it was left on this device.
+    if (net.offline && !state.tasks.length && loadSnapshot()) { lastSyncFingerprint = 'offline'; render(); }
     if (!quiet) toast(err.message);
   }
 }
@@ -3497,7 +3719,10 @@ function deleteTaskSoon(id) {
 }
 // Closing the app mid-undo still deletes; keepalive lets the request outlive the page.
 addEventListener('pagehide', () => {
-  for (const id of pendingDeletes.keys()) fetch(`/api/tasks/${id}`, { method: 'DELETE', keepalive: true });
+  for (const id of pendingDeletes.keys()) {
+    if (net.offline || outbox().length) queueWrite('DELETE', `/api/tasks/${id}`);
+    else fetch(`/api/tasks/${id}`, { method: 'DELETE', keepalive: true });
+  }
   pendingDeletes.clear();
 });
 
@@ -4558,6 +4783,7 @@ async function boot() {
   $('#app').classList.remove('hidden');
   $('#view').innerHTML = '<div class="muted" style="padding:20px 0">Loading your tasks…</div>';
   if (!location.hash) location.replace('#/today');
+  renderNet();
   applyHash();
   await sync({ quiet: true });
   loadReminders();
@@ -5270,6 +5496,7 @@ $('#sidebar-search').addEventListener('click', openPalette);
 $('#help-btn').addEventListener('click', () => $('#help').classList.remove('hidden'));
 $('#theme-btn').addEventListener('click', toggleTheme);
 $('#refresh-btn').addEventListener('click', () => sync());
+$('#net-pill').addEventListener('click', () => { net.offline = false; renderNet(); sync(); });
 $('#add-project').addEventListener('click', createProject);
 $('#add-label').addEventListener('click', () => createLabel());
 $('#remind-btn').addEventListener('click', (e) => { e.stopPropagation(); if (ctxMenu?.classList.contains('remind-menu')) closeTaskMenu(); else openRemindMenu(); });
