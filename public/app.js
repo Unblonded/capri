@@ -1217,7 +1217,8 @@ document.documentElement.addEventListener('mouseleave', () => { lightTarget?.cla
 
 function setView(view) {
   const hash = '#/' + [view.type, view.id].filter(Boolean).map(encodeURIComponent).join('/');
-  if (location.hash === hash) return applyHash();
+  // Already there: nothing to redraw or flow in again (a phone's sidebar still closes).
+  if (location.hash === hash) { schedSwap = null; return $('#sidebar').classList.remove('open'); }
   // Phones swap the view in place rather than adding a history step: iOS turns a swipe from the left
   // edge (the one that pulls out the sidebar) into Back, sliding the whole app away to the last view.
   if (isTouch()) location.replace(hash);
