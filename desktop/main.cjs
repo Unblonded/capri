@@ -160,17 +160,15 @@ function placeAll() {
 function createWidget(w) {
   if (widgetWins.has(w.id) || !config.serverUrl) return;
   const layer = widgetLayer(w);
-  const macDesktop = IS_MAC && layer === 'desktop';
   const bw = new BrowserWindow({
     ...widgetBounds(w), show: false, frame: false, transparent: true, hasShadow: false, resizable: false,
     minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, title: 'Capri widget',
-    ...(macDesktop ? { type: 'desktop', focusable: false } : {}),
-    ...(IS_MAC && !macDesktop ? { acceptFirstMouse: true } : {}), // a click ticks a task off without first focusing
+    ...(IS_MAC ? { acceptFirstMouse: true } : {}), // a click ticks a task off without first focusing
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });
   widgetWins.set(w.id, bw);
-  if (IS_MAC) bw.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: layer === 'top' });
-  if (layer === 'top') bw.setAlwaysOnTop(true, 'floating');
+  if (IS_MAC) applyLayer(w.id);
+  else if (layer === 'top') bw.setAlwaysOnTop(true, 'floating');
   bw.loadURL(widgetUrl(w));
   bw.once('ready-to-show', () => {
     if (widgetMoving.has(w.id)) { bw.show(); bw.focus(); return; }
@@ -211,6 +209,7 @@ function widgetState() {
       corner: w.pos ? null : w.corner || 'top-right', layer: w.layer || 'desktop', moving: widgetMoving.has(w.id),
     })),
     kinds: WIDGET_KINDS, layers: WIDGET_LAYERS, mac: IS_MAC, peek: widgetPeek,
+    desktopClickable: true, // Mac desktop widgets can be dragged and resized in place (no Move mode)
   };
 }
 function widgetChanged() {
@@ -232,26 +231,30 @@ function setWidgetKind(id, kind) {
   placeAll();
   widgetChanged();
 }
-// Puts an open widget on its layer without reloading it. Only a Mac desktop-level window has to be made
-// again, since a window can't change to or from that type.
+// Puts an open widget on its layer without reloading it.
+// On a Mac, "on the desktop" is the level just under ordinary windows: every app's windows cover it, but it
+// sits above the desktop's icons, so it can still be clicked, dragged and resized. (A desktop-type window
+// can't be clicked at all, can't switch layers without being made again, and often vanished with Spaces.)
+// skipTransformProcessType stops the Dock icon and menu bar flickering each time a layer changes.
 function applyLayer(id) {
   const w = widgetById(id);
   const bw = widgetWins.get(id);
   if (!w || !bw) return;
   const layer = widgetLayer(w);
-  if (!IS_MAC) {
-    if (layer === 'desktop') { bw.setAlwaysOnTop(false); desktopPin.pin(bw); } else desktopPin.unpin(bw);
+  if (IS_MAC) {
+    bw.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: layer === 'top', skipTransformProcessType: true });
+    if (layer === 'desktop') bw.setAlwaysOnTop(true, 'normal', -1);
+    else bw.setAlwaysOnTop(layer === 'top', 'floating');
+    return;
   }
+  if (layer === 'desktop') { bw.setAlwaysOnTop(false); desktopPin.pin(bw); } else desktopPin.unpin(bw);
   bw.setAlwaysOnTop(layer === 'top', 'floating');
-  if (IS_MAC) bw.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: layer === 'top' });
 }
-const macDesktopWindow = (id) => IS_MAC && widgetWins.get(id) && !widgetWins.get(id).isFocusable();
 function setWidgetLayer(id, layer) {
   if (!WIDGET_LAYERS.some(([l]) => l === layer)) return;
   updateWidget(id, { layer });
   widgetMoving.delete(id);
-  if (macDesktopWindow(id) || (IS_MAC && layer === 'desktop' && !widgetPeek)) rebuildWidget(id);
-  else applyLayer(id);
+  applyLayer(id);
   widgetChanged();
 }
 function placeWidget(id, corner) {
@@ -295,8 +298,7 @@ function resetWidgetSize(id) {
 }
 function addWidget(kind = 'today') {
   const id = `w${crypto.randomBytes(4).toString('hex')}`;
-  const layer = IS_MAC ? 'normal' : 'desktop';
-  saveConfig({ widgets: [...widgetList(), { id, on: true, kind: WIDGET_SIZES[kind] ? kind : 'today', corner: 'top-right', pos: null, size: null, layer }] });
+  saveConfig({ widgets: [...widgetList(), { id, on: true, kind: WIDGET_SIZES[kind] ? kind : 'today', corner: 'top-right', pos: null, size: null, layer: 'desktop' }] });
   createWidget(widgetById(id));
   widgetChanged();
   return id;
@@ -312,11 +314,7 @@ function removeWidget(id) {
 function setWidgetPeek(on) {
   if (widgetPeek === on) return;
   widgetPeek = on;
-  for (const w of widgetList()) {
-    if (!widgetWins.has(w.id)) continue;
-    const desktopType = IS_MAC && (w.layer || 'desktop') === 'desktop' && !widgetMoving.has(w.id);
-    if (desktopType) rebuildWidget(w.id); else applyLayer(w.id);
-  }
+  for (const w of widgetList()) if (widgetWins.has(w.id)) applyLayer(w.id);
 }
 function openWidgetStudio(id) {
   showWindow();
@@ -333,7 +331,6 @@ function widgetMenuItems(id) {
       label: 'Position',
       submenu: [
         ...CORNERS.map(([c, label]) => ({ label, type: 'radio', checked: (w.corner || 'top-right') === c && !w.pos, click: () => placeWidget(id, c) })),
-        ...(IS_MAC && (w.layer || 'desktop') === 'desktop' ? [{ type: 'separator' }, { label: 'Move or resize…', click: () => moveWidget(id) }] : []),
       ],
     },
     { label: 'Layer', submenu: WIDGET_LAYERS.map(([l, label]) => ({ label, type: 'radio', checked: (w.layer || 'desktop') === l, click: () => setWidgetLayer(id, l) })) },

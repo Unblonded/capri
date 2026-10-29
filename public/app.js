@@ -2785,7 +2785,7 @@ function studioSettingsHtml() {
         w.corner ? 'Or drag it anywhere.' : 'Placed where you dragged it. Pick a corner to snap it back.')}
       ${row('Size', `<div class="ws-sizes">${seg('size', 'size', WIDGET_SIZE_STEPS.map(([label, f]) => [f, label]), WIDGET_SIZE_STEPS.find(([, f]) => sizeOn(f))?.[1] ?? '')}
         <span class="ws-wh"><input type="number" min="160" max="900" data-ws-dim="width" value="${w.size.width}">×<input type="number" min="72" max="800" data-ws-dim="height" value="${w.size.height}"></span></div>`)}
-      ${s.mac && w.layer === 'desktop' && w.on && !s.legacy ? `<button class="ws-btn" data-ws-move>${ic('swap')} Move or resize on the desktop…</button>` : ''}
+      ${s.mac && w.layer === 'desktop' && w.on && !s.legacy && !s.desktopClickable ? `<button class="ws-btn" data-ws-move>${ic('swap')} Move or resize on the desktop…</button>` : ''}
     </section>
     <section class="ws-sec">
       <h4>Style</h4>
