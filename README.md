@@ -69,7 +69,7 @@ On a **Windows** server the update also rebuilds the desktop app whenever its ve
 `desktop/` is a small Electron shell that opens your Capri server as a desktop app:
 
 - Opens **https://capri.kalculator.lol** by default (change it from the tray icon → *Change server…*)
-- Lives in the system tray; closing the window keeps it running
+- Lives in the system tray; closing the window keeps it running. Windows decides which tray icons show on the taskbar: tray → *Show icon on the taskbar…* opens the setting (turn Capri on under *Other system tray icons*), and Capri keeps a fixed tray icon ID so the choice survives updates
 - Starts with Windows (hidden in the tray). Toggle from the tray menu
 - **Ctrl+Shift+Space** from anywhere opens quick add
 - *Pin to desktop* (tray menu, off by default): Capri sits on the desktop layer like a widget, just above your wallpaper and under your other windows, so you can add and tick off tasks right on the desktop. It leaves the taskbar while pinned and stays visible after Win+D

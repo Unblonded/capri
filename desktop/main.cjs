@@ -1,6 +1,7 @@
 // Capri desktop: a tray app that opens the Capri server running on another computer.
 const { app, BrowserWindow, Tray, Menu, Notification, globalShortcut, ipcMain, nativeImage, shell, nativeTheme, screen } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const desktopPin = require('./pin.cjs');
@@ -318,6 +319,7 @@ function buildTrayMenu() {
     { label: 'Open Capri', click: showWindow },
     { label: 'Quick add task', accelerator: QUICK_ADD_SHORTCUT, click: quickAdd },
     { type: 'separator' },
+    { label: 'Show icon on the taskbar…', visible: process.platform === 'win32', click: showTaskbarSettings },
     {
       label: 'Pin to desktop', type: 'checkbox', checked: Boolean(config.pinned),
       visible: process.platform === 'win32', enabled: desktopPin.available(),
@@ -357,8 +359,26 @@ function buildTrayMenu() {
   ]);
 }
 
+// Windows remembers whether a tray icon shows on the taskbar or hides behind the ^ arrow by the icon's
+// GUID. Without one, every update can reset your choice. Windows ties an unsigned app's GUID to its path,
+// so the GUID is made from the install path: stable across updates, never reused somewhere else.
+// The portable app runs from a fresh temporary folder each time, so it goes without.
+function trayGuid() {
+  if (process.platform !== 'win32' || !app.isPackaged || process.env.PORTABLE_EXECUTABLE_DIR) return undefined;
+  const h = crypto.createHash('sha1').update(`capri-tray:${process.execPath.toLowerCase()}`).digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${((parseInt(h[16], 16) & 3) | 8).toString(16)}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+// Apps can't put their own icon on the taskbar; this opens the setting and says which switch to flip.
+function showTaskbarSettings() {
+  shell.openExternal('ms-settings:taskbar').catch(() => {});
+  new Notification({ title: 'Keep Capri on the taskbar', body: 'Open “Other system tray icons” and turn Capri on. Windows remembers it from then on, updates included.' }).show();
+}
+
 function createTray() {
-  tray = new Tray(nativeImage.createFromPath(TRAY_ICON));
+  const image = nativeImage.createFromPath(TRAY_ICON);
+  const guid = trayGuid();
+  try { tray = guid ? new Tray(image, guid) : new Tray(image); } catch { tray = new Tray(image); }
   tray.setToolTip('Capri');
   tray.setContextMenu(buildTrayMenu());
   // Rebuild so the checkboxes reflect the current state each time.
