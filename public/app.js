@@ -389,19 +389,69 @@ function orderedProjects() {
 
 // ---------- toasts ----------
 
+// Pop-up messages pile up like a stack of cards: the newest in front, a couple of older ones peeking out
+// behind it. Hover the pile (tap it on a phone) to fan it out into a list; it waits while you do.
+const TOAST_GAP = 8;
+function layoutToasts() {
+  const box = $('#toasts');
+  const list = [...box.querySelectorAll('.toast:not(.leaving)')].reverse(); // newest first
+  if (!list.length) box.classList.remove('open');
+  const open = box.classList.contains('open') || box.matches(':hover');
+  box.classList.toggle('fanned', open && list.length > 1);
+  let y = 0;
+  list.forEach((el, i) => {
+    el.style.zIndex = String(50 - i);
+    el.classList.toggle('behind', !open && i > 0);
+    if (open) {
+      el.style.transform = `translateY(${-y}px)`;
+      el.style.opacity = '1';
+      y += el.offsetHeight + TOAST_GAP;
+    } else {
+      el.style.transform = `translateY(${-i * 13}px) scale(${1 - i * 0.05})`;
+      el.style.opacity = i > 2 ? '0' : String(1 - i * 0.18);
+    }
+  });
+  // The box covers the pile (or the fanned list) so hovering it keeps working.
+  box.style.height = `${open ? Math.max(0, y - TOAST_GAP) : (list[0]?.offsetHeight || 0) + Math.min(list.length - 1, 2) * 13}px`;
+}
+
+function dismissToast(el) {
+  if (el.classList.contains('leaving')) return;
+  el.classList.add('leaving');
+  el.style.opacity = '0';
+  el.style.transform += ' translateY(14px) scale(.96)';
+  setTimeout(() => { el.remove(); layoutToasts(); }, 260);
+  layoutToasts();
+}
+
 function toast(msg, action) {
+  const box = $('#toasts');
   const el = document.createElement('div');
   el.className = 'toast';
   el.innerHTML = `<span>${esc(msg)}</span>`;
   if (action) {
     const b = document.createElement('button');
     b.textContent = action.label;
-    b.onclick = () => { action.run(); el.remove(); };
+    b.onclick = (e) => { e.stopPropagation(); action.run(); dismissToast(el); };
     el.appendChild(b);
   }
-  $('#toasts').appendChild(el);
-  setTimeout(() => el.remove(), action ? 6000 : 2600);
+  box.appendChild(el);
+  [...box.querySelectorAll('.toast:not(.leaving)')].slice(0, -5).forEach(dismissToast); // keep five at most
+  layoutToasts();
+  // Hovering or fanning the pile holds off its timers.
+  const wait = () => (box.matches(':hover') || box.classList.contains('open') ? setTimeout(wait, 1000) : dismissToast(el));
+  setTimeout(wait, action ? 6000 : 2600);
 }
+$('#toasts').addEventListener('mouseenter', layoutToasts);
+$('#toasts').addEventListener('mouseleave', layoutToasts);
+$('#toasts').addEventListener('click', (e) => {
+  if (e.target.closest('button')) return;
+  $('#toasts').classList.toggle('open');
+  layoutToasts();
+});
+document.addEventListener('pointerdown', (e) => {
+  if ($('#toasts').classList.contains('open') && !e.target.closest('#toasts')) { $('#toasts').classList.remove('open'); layoutToasts(); }
+});
 
 // ---------- themed dropdowns ----------
 // Native <select> menus are drawn by the OS (white on Windows, whatever the theme), so every select is

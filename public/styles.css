@@ -673,13 +673,21 @@ body.col-sorting, body.col-sorting * { cursor: grabbing !important; user-select:
   padding: 8px 10px 8px 16px; border-radius: 999px; background: var(--glass-strong); animation: rise .2s ease; flex-wrap: wrap; max-width: calc(100vw - 32px);
 }
 #bulk-count { font-weight: 650; margin-right: 6px; }
-.toasts { position: fixed; bottom: 22px; right: 22px; display: grid; gap: 8px; z-index: 60; }
+/* Toasts sit in a pile (see layoutToasts): see-through glass cards, the newest in front. */
+.toasts { position: fixed; bottom: 22px; right: 22px; width: min(340px, calc(100vw - 32px)); z-index: 60; transition: height .3s var(--ease-out, ease); }
 .toast {
-  background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
-  border: 1px solid var(--glass-border); color: var(--text); padding: 11px 16px; border-radius: 16px; box-shadow: var(--shadow);
-  display: flex; gap: 14px; align-items: center; font-size: 13px; animation: rise .2s ease; font-weight: 500;
+  position: absolute; left: 0; right: 0; bottom: 0; transform-origin: bottom center;
+  background: color-mix(in srgb, var(--glass-strong) 62%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6); backdrop-filter: blur(18px) saturate(1.6);
+  border: 1px solid var(--glass-border); color: var(--text); padding: 12px 16px; border-radius: 18px; box-shadow: var(--shadow);
+  display: flex; gap: 14px; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 500; cursor: default;
+  transition: transform .38s var(--ease-out, cubic-bezier(.2, .8, .2, 1)), opacity .3s ease;
 }
-.toast button { background: none; border: 0; color: var(--accent); font-weight: 700; }
+.toast span { min-width: 0; overflow-wrap: anywhere; }
+.toast.behind > * { opacity: 0; transition: opacity .2s; } /* only the front card's words show in the pile */
+.toast.behind { box-shadow: 0 6px 18px var(--glass-shade); }
+.toasts:not(.fanned) .toast.behind { pointer-events: none; }
+.toast button { background: none; border: 0; color: var(--accent); font-weight: 700; flex-shrink: 0; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1180px) {
@@ -697,7 +705,7 @@ body.col-sorting, body.col-sorting * { cursor: grabbing !important; user-select:
   .detail { right: 8px; top: 8px; bottom: 8px; width: calc(100vw - 16px); }
   .proj-row { grid-template-columns: 100px 1fr 32px; }
   .cards-2 { grid-template-columns: 1fr; }
-  .toasts { left: 16px; right: 16px; }
+  .toasts { left: 16px; right: 16px; width: auto; }
   kbd { display: none; }
   .help-grid kbd { display: inline; }
 }
@@ -1130,7 +1138,7 @@ html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -we
 .detail { animation: drawer-in .5s var(--ease-out); }
 @keyframes drawer-in { from { opacity: 0; transform: translateX(36px) scale(.97); filter: blur(6px); } }
 .toast { animation: toast-in .5s var(--spring); }
-@keyframes toast-in { from { opacity: 0; transform: translateY(16px) scale(.9); } }
+@keyframes toast-in { from { opacity: 0; translate: 0 18px; scale: .92; } }
 .dd-menu { animation: menu-in .28s var(--ease-out); transform-origin: top; }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-6px) scale(.96); } }
 @media (max-width: 760px) {
