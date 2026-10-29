@@ -2244,10 +2244,13 @@ document.addEventListener('change', (e) => {
 });
 
 
-// ---------- Right now widget and the pinned strip ----------
-// The desktop app's widget window loads Capri with ?widget=1 and shows only a small Right now card.
-// The full window, pinned to the desktop, shows the same thing as a slim strip above the page.
-const WIDGET = new URLSearchParams(location.search).has('widget');
+// ---------- desktop widget and the pinned strip ----------
+// The desktop app's widget window loads Capri with ?widget=<kind> and shows one small card: what's on now,
+// today's tasks, the focus timer, or upcoming deadlines. With &move=1 (Mac) it can be dragged, then Done.
+// The full window, pinned to the desktop, shows what's on now as a slim strip above the page.
+const widgetParams = new URLSearchParams(location.search);
+const WIDGET = widgetParams.has('widget') && (['now', 'today', 'focus', 'deadlines'].includes(widgetParams.get('widget')) ? widgetParams.get('widget') : 'now');
+const WIDGET_MOVE = widgetParams.has('move');
 
 function nowParts() {
   const { now, cur, next } = nowInfo();
@@ -2260,19 +2263,61 @@ function nowParts() {
   return null;
 }
 
+const WIDGET_LABELS = { now: ['clock', 'Right now'], today: ['sun', 'Today'], focus: ['timer', 'Focus'], deadlines: ['flag', 'Deadlines'] };
+
+function widgetBody() {
+  if (WIDGET === 'today') {
+    const t = today();
+    const list = sortTasks(openTasks().filter((x) => dueDay(x) && dueDay(x) <= t && !x.parent_id), 'smart');
+    if (!list.length) return { body: `<div class="w-title">All clear</div><div class="w-left">Nothing due today.</div>` };
+    const shown = list.slice(0, 5);
+    return {
+      count: list.length,
+      body: `<div class="w-list">${shown.map((x) => `<div class="w-row"><span class="w-dot ${prioClass(x.priority)}"></span><span class="w-name">${esc(plain(x.content))}</span>${
+        dueDay(x) < t ? '<span class="w-when late">late</span>' : dueTime(x) ? `<span class="w-when">${esc(dueTime(x))}</span>` : ''}</div>`).join('')}</div>
+        ${list.length > shown.length ? `<div class="w-next">+${list.length - shown.length} more</div>` : ''}`,
+    };
+  }
+  if (WIDGET === 'deadlines') {
+    const list = openTasks().filter((x) => deadlineDay(x)).sort((a, b) => deadlineDay(a).localeCompare(deadlineDay(b))).slice(0, 4);
+    if (!list.length) return { body: `<div class="w-title">No deadlines</div><div class="w-left">Nothing with a deadline coming up.</div>` };
+    return {
+      body: `<div class="w-list">${list.map((x) => `<div class="w-row"><span class="w-name">${esc(plain(x.content))}</span><span class="w-when ${dlClass(deadlineDay(x))}">${esc(countdown(deadlineDay(x)))}</span></div>`).join('')}</div>`,
+    };
+  }
+  if (WIDGET === 'focus') {
+    const tm = store.get('timer', { mode: 'focus', remaining: TIMER_LEN.focus, running: false, endAt: 0, taskId: null }); // the app's latest
+    const left = tm.running ? Math.max(0, Math.round((tm.endAt - Date.now()) / 1000)) : tm.remaining;
+    const task = tm.taskId && taskById(tm.taskId);
+    return {
+      on: tm.running,
+      label: tm.mode === 'break' ? 'Break' : tm.running ? 'Focusing' : 'Focus',
+      body: `<div class="w-clock"><span class="w-time">${mmss(left)}</span><span class="w-state">${tm.running ? '' : 'paused'}</span></div>
+        <div class="w-bar ${tm.mode === 'break' ? 'brk' : ''}"><span style="width:${(1 - left / TIMER_LEN[tm.mode]) * 100}%"></span></div>
+        <div class="w-next">${task ? esc(plain(task.content)) : 'No task linked'}</div>`,
+    };
+  }
+  const p = nowParts();
+  if (!p) return { body: `<div class="w-title">${dayBlocks(today()).length ? 'All done for today' : 'Nothing planned'}</div><div class="w-left">${schedules().length ? 'Enjoy the rest of the day.' : 'Make a schedule in Capri to see it here.'}</div>` };
+  return {
+    on: p.on,
+    body: `<div class="w-title">${esc(p.title)}</div>
+      <div class="w-left"><b>${esc(p.left)}</b> ${esc(p.until)}</div>
+      ${p.on ? `<div class="w-bar"><span style="width:${p.pct}%"></span></div>` : ''}
+      ${p.next ? `<div class="w-next">Next: ${esc(p.next.title)} · ${esc(fmtTime(p.next.start))}</div>` : ''}`,
+  };
+}
+
 function renderWidget({ signedOut = false } = {}) {
   let el = $('#widget');
   if (!el) { el = document.createElement('div'); el.id = 'widget'; document.body.append(el); }
-  const p = signedOut ? null : nowParts();
-  const open = window.capriDesktop?.openApp ? `<button class="w-open" data-widget-open title="Open Capri">${ic('external')}</button>` : '';
-  const body = signedOut ? '<div class="w-title">Open Capri to sign in</div>'
-    : !p ? `<div class="w-title">${dayBlocks(today()).length ? 'All done for today' : 'Nothing planned'}</div><div class="w-left">${schedules().length ? 'Enjoy the rest of the day.' : 'Make a schedule in Capri to see it here.'}</div>`
-    : `<div class="w-title">${esc(p.title)}</div>
-      <div class="w-left"><b>${esc(p.left)}</b> ${esc(p.until)}</div>
-      ${p.on ? `<div class="w-bar"><span style="width:${p.pct}%"></span></div>` : ''}
-      ${p.next ? `<div class="w-next">Next: ${esc(p.next.title)} · ${esc(fmtTime(p.next.start))}</div>` : ''}`;
-  el.className = `wcard ${p?.on ? 'now' : ''}`;
-  el.innerHTML = `<div class="w-top"><span class="w-label">${ic('clock')} Right now</span>${open}</div>${body}`;
+  const w = signedOut ? { body: '<div class="w-title">Open Capri to sign in</div>' } : widgetBody();
+  const [icon, label] = WIDGET_LABELS[WIDGET];
+  const open = window.capriDesktop?.openApp && !WIDGET_MOVE ? `<button class="w-open" data-widget-open title="Open Capri">${ic('external')}</button>` : '';
+  const done = WIDGET_MOVE ? '<button class="w-done" data-widget-done>Done</button>' : '';
+  el.className = `wcard w-${WIDGET} ${w.on ? 'now' : ''} ${WIDGET_MOVE ? 'moving' : ''}`;
+  const title = WIDGET_MOVE ? 'Drag to place' : esc(w.label || label);
+  el.innerHTML = `<div class="w-top"><span class="w-label">${ic(icon)} ${title}${w.count && !WIDGET_MOVE ? ` <span class="w-count">${w.count}</span>` : ''}</span>${open}${done}</div>${w.body}`;
 }
 
 async function bootWidget() {
@@ -2282,14 +2327,22 @@ async function bootWidget() {
     try {
       const status = await api('GET', '/api/status');
       if (!status.connected) return renderWidget({ signedOut: true });
-      state.schedule = await api('GET', '/api/schedule');
+      if (WIDGET === 'now') state.schedule = await api('GET', '/api/schedule');
+      else {
+        const [data, deadlines] = await Promise.all([api('GET', '/api/bootstrap'), api('GET', '/api/deadlines')]);
+        Object.assign(state, data, { deadlines });
+      }
       renderWidget();
     } catch { /* keep showing the last card until the server answers */ }
   };
   await load();
-  setInterval(renderWidget, 20000); // the countdown
-  setInterval(load, 2 * 60000); // schedule changes made elsewhere
-  document.addEventListener('click', (e) => { if (e.target.closest('[data-widget-open]')) window.capriDesktop?.openApp?.(); });
+  setInterval(renderWidget, WIDGET === 'focus' ? 1000 : 20000); // the timer ticks; the rest counts down by the minute
+  setInterval(load, 2 * 60000); // changes made elsewhere
+  addEventListener('storage', (e) => { if (e.key === 'tdp:timer') renderWidget(); }); // the app started, paused or reset the timer
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-widget-open]')) window.capriDesktop?.openApp?.();
+    if (e.target.closest('[data-widget-done]')) window.capriDesktop?.widgetDone?.();
+  });
 }
 
 function updateNowStrip() {
@@ -3237,6 +3290,7 @@ function chime() {
 }
 
 setInterval(() => {
+  if (WIDGET) return; // the widget only shows the timer; the app runs it
   if (timer.running && timerLeft() <= 0) {
     const msg = timer.mode === 'focus' ? 'Focus session done — take a 5 minute break.' : 'Break over — back to it.';
     if (timer.mode === 'focus') { const log = focusLog(); log.count++; store.set('focusLog', log); }

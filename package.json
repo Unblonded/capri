@@ -1,6 +1,6 @@
 {
   "name": "capri",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Capri — a liquid-glass Todoist client running on Express",
   "main": "desktop/main.cjs",
   "type": "module",

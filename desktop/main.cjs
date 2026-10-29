@@ -78,57 +78,84 @@ function markPinned() {
   win.webContents.executeJavaScript(`document.documentElement.classList.toggle('pinned', ${Boolean(config.pinned)}); dispatchEvent(new Event('capri-pinned'))`).catch(() => {});
 }
 
-// ---- Right now widget ----
-// A small card on the desktop, behind every window, showing what's on in your schedule, how long it has
-// left and what's next. Windows: handed to the desktop like the pinned window, and draggable. Mac: a
-// desktop-level window, which macOS won't let take clicks, so it's placed from the menu instead.
+// ---- desktop widget ----
+// A small card on the desktop, behind every window. It shows one thing, picked from the menu: what's on
+// in your schedule right now, today's tasks, the focus timer, or upcoming deadlines. Windows: handed to
+// the desktop like the pinned window, and draggable. Mac: a desktop-level window, which macOS won't let
+// take clicks, so Move widget… lifts it out to be dragged and Done puts it back.
 let widget = null;
-const WIDGET_SIZE = { width: 300, height: 132 };
-const widgetUrl = () => `${config.serverUrl}/?widget=1`;
+let widgetMoving = false;
+const WIDGET_KINDS = [['now', 'Right now'], ['today', 'Today’s tasks'], ['focus', 'Focus timer'], ['deadlines', 'Deadlines']];
+const WIDGET_SIZES = { now: { width: 300, height: 132 }, focus: { width: 300, height: 132 }, today: { width: 300, height: 236 }, deadlines: { width: 300, height: 196 } };
+const widgetKind = () => (WIDGET_SIZES[config.widgetKind] ? config.widgetKind : 'now');
+const widgetUrl = () => `${config.serverUrl}/?widget=${widgetKind()}${widgetMoving ? '&move=1' : ''}`;
 function widgetBounds() {
-  const pos = !IS_MAC && config.widgetPos;
+  const size = WIDGET_SIZES[widgetKind()];
+  const pos = config.widgetPos;
   if (pos && screen.getAllDisplays().some(({ workArea: a }) => pos.x >= a.x && pos.y >= a.y && pos.x + 40 <= a.x + a.width && pos.y + 40 <= a.y + a.height)) {
-    return { ...pos, ...WIDGET_SIZE };
+    return { ...pos, ...size };
   }
   const a = screen.getPrimaryDisplay().workArea;
   const corner = config.widgetCorner || 'top-right';
   const m = 20;
   return {
-    x: corner.endsWith('left') ? a.x + m : a.x + a.width - WIDGET_SIZE.width - m,
-    y: corner.startsWith('top') ? a.y + m : a.y + a.height - WIDGET_SIZE.height - m,
-    ...WIDGET_SIZE,
+    x: corner.endsWith('left') ? a.x + m : a.x + a.width - size.width - m,
+    y: corner.startsWith('top') ? a.y + m : a.y + a.height - size.height - m,
+    ...size,
   };
 }
 function createWidget() {
   if (widget || !config.serverUrl) return;
+  const onDesktop = IS_MAC && !widgetMoving; // while moving on a Mac it's an ordinary window you can drag
   widget = new BrowserWindow({
     ...widgetBounds(), show: false, frame: false, transparent: true, hasShadow: false, resizable: false,
-    minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, title: 'Capri Right now',
-    ...(IS_MAC ? { type: 'desktop', focusable: false } : {}),
+    minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, title: 'Capri widget',
+    ...(onDesktop ? { type: 'desktop', focusable: false } : {}),
+    ...(widgetMoving ? { alwaysOnTop: true } : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });
   if (IS_MAC) widget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
   widget.loadURL(widgetUrl());
   widget.once('ready-to-show', () => {
+    if (widgetMoving) { widget.show(); widget.focus(); return; }
     widget.showInactive();
     if (!IS_MAC && !desktopPin.pin(widget)) widget.setAlwaysOnTop(false);
   });
-  widget.on('focus', () => { if (!IS_MAC) desktopPin.sendToBack(widget); });
-  widget.on('moved', () => { if (!IS_MAC) { const [x, y] = widget.getPosition(); saveConfig({ widgetPos: { x, y } }); } });
+  widget.on('focus', () => { if (!IS_MAC && !widgetMoving) desktopPin.sendToBack(widget); });
+  widget.on('moved', () => { const [x, y] = widget.getPosition(); saveConfig({ widgetPos: { x, y } }); });
   widget.on('minimize', () => widget.restore());
   widget.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   widget.webContents.on('will-navigate', (e, url) => { if (!isServer(url)) e.preventDefault(); });
   widget.on('closed', () => { widget = null; });
 }
+function rebuildWidget() {
+  if (widget) widget.destroy();
+  widget = null;
+  if (config.widget) createWidget();
+}
 function setWidget(on) {
   saveConfig({ widget: on });
-  if (on) createWidget();
-  else if (widget) widget.destroy();
+  widgetMoving = false;
+  rebuildWidget();
+}
+function setWidgetKind(kind) {
+  saveConfig({ widgetKind: kind });
+  rebuildWidget(); // each kind has its own size
 }
 function placeWidget(corner) {
   saveConfig({ widgetCorner: corner, widgetPos: null });
   if (widget) widget.setBounds(widgetBounds());
 }
+function moveWidget() {
+  widgetMoving = true;
+  rebuildWidget();
+}
+ipcMain.on('capri:widget-done', () => {
+  if (!widgetMoving) return;
+  if (widget) { const [x, y] = widget.getPosition(); saveConfig({ widgetPos: { x, y } }); }
+  widgetMoving = false;
+  rebuildWidget();
+});
 ipcMain.on('capri:open', () => showWindow());
 
 function createWindow() {
@@ -296,12 +323,19 @@ function buildTrayMenu() {
       visible: process.platform === 'win32', enabled: desktopPin.available(),
       click: (item) => setPinned(item.checked),
     },
-    { label: 'Right now widget', type: 'checkbox', checked: Boolean(config.widget), enabled: Boolean(config.serverUrl), click: (item) => setWidget(item.checked) },
+    { label: 'Desktop widget', type: 'checkbox', checked: Boolean(config.widget), enabled: Boolean(config.serverUrl), click: (item) => setWidget(item.checked) },
+    {
+      label: 'Widget shows', enabled: Boolean(config.widget),
+      submenu: WIDGET_KINDS.map(([id, label]) => ({ label, type: 'radio', checked: widgetKind() === id, click: () => setWidgetKind(id) })),
+    },
     {
       label: 'Widget position', enabled: Boolean(config.widget),
-      submenu: [['top-right', 'Top right'], ['top-left', 'Top left'], ['bottom-right', 'Bottom right'], ['bottom-left', 'Bottom left']].map(([id, label]) => ({
-        label, type: 'radio', checked: (config.widgetCorner || 'top-right') === id && !(!IS_MAC && config.widgetPos), click: () => placeWidget(id),
-      })),
+      submenu: [
+        ...[['top-right', 'Top right'], ['top-left', 'Top left'], ['bottom-right', 'Bottom right'], ['bottom-left', 'Bottom left']].map(([id, label]) => ({
+          label, type: 'radio', checked: (config.widgetCorner || 'top-right') === id && !config.widgetPos, click: () => placeWidget(id),
+        })),
+        ...(IS_MAC ? [{ type: 'separator' }, { label: 'Move widget…', click: moveWidget }] : []),
+      ],
     },
     {
       label: 'Always on top', type: 'checkbox', checked: Boolean(config.alwaysOnTop), enabled: !config.pinned,
