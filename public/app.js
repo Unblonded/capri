@@ -1628,7 +1628,7 @@ function testReminder() {
 // In the desktop app (or a browser without pushes) the reminders come from here, checked every 30 seconds.
 const localSent = new Map(Object.entries(store.get('remindSent', {})));
 setInterval(() => {
-  if (remind.mode !== 'local' || !state.tasks.length) return;
+  if (WIDGET || remind.mode !== 'local' || !state.tasks.length) return; // the widget window leaves reminders to the app
   const now = Date.now();
   const due = [];
   const { lead, blocks } = remind.settings;
@@ -2243,6 +2243,69 @@ document.addEventListener('change', (e) => {
   if (tpl && name && name !== scheduleById(tpl)?.name) updateSchedule(tpl, () => ({ name }));
 });
 
+
+// ---------- Right now widget and the pinned strip ----------
+// The desktop app's widget window loads Capri with ?widget=1 and shows only a small Right now card.
+// The full window, pinned to the desktop, shows the same thing as a slim strip above the page.
+const WIDGET = new URLSearchParams(location.search).has('widget');
+
+function nowParts() {
+  const { now, cur, next } = nowInfo();
+  if (cur) {
+    const total = toMin(cur.end) - toMin(cur.start);
+    const left = toMin(cur.end) - now;
+    return { on: true, title: cur.title, left: `${lengthText(left)} left`, until: `until ${fmtTime(cur.end)}`, pct: ((total - left) / total) * 100, next };
+  }
+  if (next) return { on: false, title: 'Free time', left: lengthText(toMin(next.start) - now), until: `until ${next.title} at ${fmtTime(next.start)}`, next: null };
+  return null;
+}
+
+function renderWidget({ signedOut = false } = {}) {
+  let el = $('#widget');
+  if (!el) { el = document.createElement('div'); el.id = 'widget'; document.body.append(el); }
+  const p = signedOut ? null : nowParts();
+  const open = window.capriDesktop?.openApp ? `<button class="w-open" data-widget-open title="Open Capri">${ic('external')}</button>` : '';
+  const body = signedOut ? '<div class="w-title">Open Capri to sign in</div>'
+    : !p ? `<div class="w-title">${dayBlocks(today()).length ? 'All done for today' : 'Nothing planned'}</div><div class="w-left">${schedules().length ? 'Enjoy the rest of the day.' : 'Make a schedule in Capri to see it here.'}</div>`
+    : `<div class="w-title">${esc(p.title)}</div>
+      <div class="w-left"><b>${esc(p.left)}</b> ${esc(p.until)}</div>
+      ${p.on ? `<div class="w-bar"><span style="width:${p.pct}%"></span></div>` : ''}
+      ${p.next ? `<div class="w-next">Next: ${esc(p.next.title)} · ${esc(fmtTime(p.next.start))}</div>` : ''}`;
+  el.className = `wcard ${p?.on ? 'now' : ''}`;
+  el.innerHTML = `<div class="w-top"><span class="w-label">${ic('clock')} Right now</span>${open}</div>${body}`;
+}
+
+async function bootWidget() {
+  document.documentElement.classList.add('widget-mode');
+  $('#connect').classList.add('hidden');
+  const load = async () => {
+    try {
+      const status = await api('GET', '/api/status');
+      if (!status.connected) return renderWidget({ signedOut: true });
+      state.schedule = await api('GET', '/api/schedule');
+      renderWidget();
+    } catch { /* keep showing the last card until the server answers */ }
+  };
+  await load();
+  setInterval(renderWidget, 20000); // the countdown
+  setInterval(load, 2 * 60000); // schedule changes made elsewhere
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-widget-open]')) window.capriDesktop?.openApp?.(); });
+}
+
+function updateNowStrip() {
+  const strip = $('#now-strip');
+  if (!strip) return;
+  const p = document.documentElement.classList.contains('pinned') && state.tasks.length ? nowParts() : null;
+  strip.classList.toggle('hidden', !p);
+  if (!p) return;
+  strip.classList.toggle('now', p.on);
+  strip.innerHTML = `${ic('clock')}<b>${esc(p.title)}</b><span class="ns-left">${esc(p.left)} ${esc(p.until)}</span>
+    ${p.on ? `<span class="ns-bar"><span style="width:${p.pct}%"></span></span>` : '<span class="spacer"></span>'}
+    ${p.next ? `<span class="ns-next">Next: ${esc(p.next.title)} · ${esc(fmtTime(p.next.start))}</span>` : ''}`;
+}
+addEventListener('capri-pinned', updateNowStrip);
+setInterval(updateNowStrip, 20000);
+
 // ---------- focus view ----------
 // What to work on next: overdue and today's tasks, deadlines closing in, and high priorities, best first.
 function focusScore(t) {
@@ -2472,6 +2535,7 @@ function renderView() {
   viewEl.innerHTML = html;
   layoutBoard();
   scrollScheduleToNow();
+  updateNowStrip();
   state.baseTitle = `${title} · Capri`;
   renderRing();
   renderTimer();
@@ -3855,6 +3919,7 @@ function moveSelection(delta) {
 // ---------- connect screen ----------
 
 function showConnect({ expired = false } = {}) {
+  if (WIDGET) return renderWidget({ signedOut: true });
   $('#app').classList.add('hidden');
   $('#connect').classList.remove('hidden');
   $('#connect-expired').classList.toggle('hidden', !expired);
@@ -3895,6 +3960,7 @@ if ('serviceWorker' in navigator && isSecureContext) {
 
 async function boot() {
   applyTheme(store.get('theme', matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  if (WIDGET) return bootWidget();
   state.sort = store.get('sort', 'smart');
   const status = await api('GET', '/api/status');
   $('#oauth-btn').classList.toggle('hidden', !status.oauthAvailable);

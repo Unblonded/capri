@@ -1,5 +1,5 @@
 // Capri desktop: a tray app that opens the Capri server running on another computer.
-const { app, BrowserWindow, Tray, Menu, Notification, globalShortcut, ipcMain, nativeImage, shell, nativeTheme } = require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, globalShortcut, ipcMain, nativeImage, shell, nativeTheme, screen } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -69,7 +69,67 @@ function showSetup(error = '') {
 function openServer() {
   if (!config.serverUrl) return showSetup();
   win.loadURL(config.serverUrl);
+  if (widget) widget.loadURL(widgetUrl());
 }
+
+// The page shows a slim Right now strip while the window is pinned to the desktop.
+function markPinned() {
+  if (!win || win.webContents.getURL().startsWith('file:')) return;
+  win.webContents.executeJavaScript(`document.documentElement.classList.toggle('pinned', ${Boolean(config.pinned)}); dispatchEvent(new Event('capri-pinned'))`).catch(() => {});
+}
+
+// ---- Right now widget ----
+// A small card on the desktop, behind every window, showing what's on in your schedule, how long it has
+// left and what's next. Windows: handed to the desktop like the pinned window, and draggable. Mac: a
+// desktop-level window, which macOS won't let take clicks, so it's placed from the menu instead.
+let widget = null;
+const WIDGET_SIZE = { width: 300, height: 132 };
+const widgetUrl = () => `${config.serverUrl}/?widget=1`;
+function widgetBounds() {
+  const pos = !IS_MAC && config.widgetPos;
+  if (pos && screen.getAllDisplays().some(({ workArea: a }) => pos.x >= a.x && pos.y >= a.y && pos.x + 40 <= a.x + a.width && pos.y + 40 <= a.y + a.height)) {
+    return { ...pos, ...WIDGET_SIZE };
+  }
+  const a = screen.getPrimaryDisplay().workArea;
+  const corner = config.widgetCorner || 'top-right';
+  const m = 20;
+  return {
+    x: corner.endsWith('left') ? a.x + m : a.x + a.width - WIDGET_SIZE.width - m,
+    y: corner.startsWith('top') ? a.y + m : a.y + a.height - WIDGET_SIZE.height - m,
+    ...WIDGET_SIZE,
+  };
+}
+function createWidget() {
+  if (widget || !config.serverUrl) return;
+  widget = new BrowserWindow({
+    ...widgetBounds(), show: false, frame: false, transparent: true, hasShadow: false, resizable: false,
+    minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, title: 'Capri Right now',
+    ...(IS_MAC ? { type: 'desktop', focusable: false } : {}),
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
+  });
+  if (IS_MAC) widget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+  widget.loadURL(widgetUrl());
+  widget.once('ready-to-show', () => {
+    widget.showInactive();
+    if (!IS_MAC && !desktopPin.pin(widget)) widget.setAlwaysOnTop(false);
+  });
+  widget.on('focus', () => { if (!IS_MAC) desktopPin.sendToBack(widget); });
+  widget.on('moved', () => { if (!IS_MAC) { const [x, y] = widget.getPosition(); saveConfig({ widgetPos: { x, y } }); } });
+  widget.on('minimize', () => widget.restore());
+  widget.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  widget.webContents.on('will-navigate', (e, url) => { if (!isServer(url)) e.preventDefault(); });
+  widget.on('closed', () => { widget = null; });
+}
+function setWidget(on) {
+  saveConfig({ widget: on });
+  if (on) createWidget();
+  else if (widget) widget.destroy();
+}
+function placeWidget(corner) {
+  saveConfig({ widgetCorner: corner, widgetPos: null });
+  if (widget) widget.setBounds(widgetBounds());
+}
+ipcMain.on('capri:open', () => showWindow());
 
 function createWindow() {
   const bounds = config.bounds || { width: 1200, height: 800 };
@@ -100,6 +160,7 @@ function createWindow() {
 
   // Leave room for the window buttons and make the top strip draggable.
   win.webContents.on('did-finish-load', () => {
+    markPinned();
     win.webContents.insertCSS(`
       body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: 34px; z-index: 1000; -webkit-app-region: drag; }
       .app { padding-top: 38px !important; }
@@ -210,6 +271,7 @@ function setPinned(on) {
   if (on) win.setAlwaysOnTop(false);
   else win.setAlwaysOnTop(Boolean(config.alwaysOnTop));
   saveConfig({ pinned: on });
+  markPinned();
 }
 
 // Drops cached pages, scripts and styles so the latest from the server loads. Cookies stay,
@@ -233,6 +295,13 @@ function buildTrayMenu() {
       label: 'Pin to desktop', type: 'checkbox', checked: Boolean(config.pinned),
       visible: process.platform === 'win32', enabled: desktopPin.available(),
       click: (item) => setPinned(item.checked),
+    },
+    { label: 'Right now widget', type: 'checkbox', checked: Boolean(config.widget), enabled: Boolean(config.serverUrl), click: (item) => setWidget(item.checked) },
+    {
+      label: 'Widget position', enabled: Boolean(config.widget),
+      submenu: [['top-right', 'Top right'], ['top-left', 'Top left'], ['bottom-right', 'Bottom right'], ['bottom-left', 'Bottom left']].map(([id, label]) => ({
+        label, type: 'radio', checked: (config.widgetCorner || 'top-right') === id && !(!IS_MAC && config.widgetPos), click: () => placeWidget(id),
+      })),
     },
     {
       label: 'Always on top', type: 'checkbox', checked: Boolean(config.alwaysOnTop), enabled: !config.pinned,
@@ -331,6 +400,10 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     createWindow();
     createTray();
+    if (config.widget) createWidget();
+    // The widget keeps to its corner when screens are added, removed or resized.
+    screen.on('display-metrics-changed', () => widget?.setBounds(widgetBounds()));
+    screen.on('display-removed', () => widget?.setBounds(widgetBounds()));
     globalShortcut.register(QUICK_ADD_SHORTCUT, quickAdd);
     setupUpdates();
     // First launch: start with Windows unless the user turns it off from the tray.
