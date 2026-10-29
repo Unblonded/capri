@@ -70,7 +70,7 @@ function showSetup(error = '') {
 function openServer() {
   if (!config.serverUrl) return showSetup();
   win.loadURL(config.serverUrl);
-  if (widget) widget.loadURL(widgetUrl());
+  for (const [id, bw] of widgetWins) { const w = widgetById(id); if (w) bw.loadURL(widgetUrl(w)); }
 }
 
 // The page shows a slim Right now strip while the window is pinned to the desktop.
@@ -79,193 +79,316 @@ function markPinned() {
   win.webContents.executeJavaScript(`document.documentElement.classList.toggle('pinned', ${Boolean(config.pinned)}); dispatchEvent(new Event('capri-pinned'))`).catch(() => {});
 }
 
-// ---- desktop widget ----
-// A small card on the desktop, behind every window. It shows one thing, picked from the menu: what's on
-// in your schedule right now, today's tasks, the focus timer, or upcoming deadlines. Drag it to move it,
-// drag its corner to resize it, right-click it for its menu, tick tasks off on it. Windows: handed to the
-// desktop like the pinned window. Mac: an ordinary window you can click, unless "Can be clicked" is off;
-// then it's a desktop-level window, which macOS won't let take clicks, so Move or resize… lifts it out
-// for a while and Done puts it back.
-let widget = null;
-let widgetMoving = false;
+// ---- desktop widgets ----
+// Small cards on the desktop, as many as you like. Each shows one thing: what's on in your schedule right
+// now, today's tasks, the focus timer, or upcoming deadlines. Drag one to move it, drag its corner to resize
+// it, right-click it for its menu, tick tasks off on it. How each looks is set in Capri (sidebar → widget
+// button), which keeps the look in the browser storage the widget windows share.
+// Each sits on a layer:
+//   desktop: behind every window. Windows: handed to the desktop like the pinned window. Mac: a
+//            desktop-level window, which macOS won't let take clicks, so Move or resize… lifts it out
+//            for a while and Done puts it back.
+//   normal:  an ordinary window that other windows can cover.
+//   top:     always on top of other windows.
+// While you customise them in Capri, they all float on top (peek) so you can watch them change.
 const WIDGET_KINDS = [['now', 'Right now'], ['today', 'Today’s tasks'], ['focus', 'Focus timer'], ['deadlines', 'Deadlines']];
 const WIDGET_SIZES = { now: { width: 300, height: 132 }, focus: { width: 300, height: 132 }, today: { width: 300, height: 236 }, deadlines: { width: 300, height: 196 } };
-const widgetKind = () => (WIDGET_SIZES[config.widgetKind] ? config.widgetKind : 'now');
-const WIDGET_MIN = { width: 200, height: 92 };
-const WIDGET_MAX = { width: 760, height: 680 };
-const widgetSize = () => config.widgetSizes?.[widgetKind()] || WIDGET_SIZES[widgetKind()];
-const widgetOnDesktop = () => IS_MAC && config.widgetClickable === false;
-const widgetUrl = () => `${config.serverUrl}/?widget=${widgetKind()}${widgetMoving ? '&move=1' : ''}`;
-function widgetBounds() {
-  const size = widgetSize();
-  const pos = config.widgetPos;
+const WIDGET_MIN = { width: 160, height: 72 };
+const WIDGET_MAX = { width: 900, height: 800 };
+const WIDGET_LAYERS = [['desktop', 'On the desktop'], ['normal', 'Normal window'], ['top', 'Always on top']];
+const CORNERS = [['top-right', 'Top right'], ['top-left', 'Top left'], ['bottom-right', 'Bottom right'], ['bottom-left', 'Bottom left']];
+const widgetWins = new Map(); // widget id → its window
+const widgetMoving = new Set(); // ids lifted off the Mac desktop to be dragged
+let widgetPeek = false;
+
+// The list of widgets, from the old single-widget settings the first time.
+function widgetList() {
+  if (!Array.isArray(config.widgets)) {
+    const kind = WIDGET_SIZES[config.widgetKind] ? config.widgetKind : 'now';
+    saveConfig({
+      widgets: [{
+        id: 'w1', on: Boolean(config.widget), kind, corner: config.widgetCorner || 'top-right', pos: config.widgetPos || null,
+        size: config.widgetSizes?.[kind] || null, layer: IS_MAC && config.widgetClickable !== false ? 'normal' : 'desktop',
+      }],
+    });
+  }
+  return config.widgets;
+}
+const widgetById = (id) => widgetList().find((w) => w.id === id);
+function updateWidget(id, changes) {
+  saveConfig({ widgets: widgetList().map((w) => (w.id === id ? { ...w, ...changes } : w)) });
+  return widgetById(id);
+}
+const widgetSize = (w) => w.size || WIDGET_SIZES[w.kind] || WIDGET_SIZES.now;
+const widgetLayer = (w) => (widgetPeek || widgetMoving.has(w.id) ? 'top' : w.layer || 'desktop');
+const widgetUrl = (w) => `${config.serverUrl}/?widget=${w.kind}&id=${w.id}${widgetMoving.has(w.id) ? '&move=1' : ''}`;
+const idOfSender = (sender) => [...widgetWins].find(([, bw]) => bw.webContents === sender)?.[0];
+
+function widgetBounds(w) {
+  const size = widgetSize(w);
+  const pos = w.pos;
   if (pos && screen.getAllDisplays().some(({ workArea: a }) => pos.x >= a.x && pos.y >= a.y && pos.x + 40 <= a.x + a.width && pos.y + 40 <= a.y + a.height)) {
     return { ...pos, ...size };
   }
   const a = screen.getPrimaryDisplay().workArea;
-  const corner = config.widgetCorner || 'top-right';
+  const corner = w.corner || 'top-right';
+  // Widgets sharing a corner stack instead of sitting on top of each other.
+  const before = widgetList().filter((o) => o.on && !o.pos && (o.corner || 'top-right') === corner).findIndex((o) => o.id === w.id);
+  const offset = widgetList().filter((o) => o.on && !o.pos && (o.corner || 'top-right') === corner).slice(0, Math.max(0, before))
+    .reduce((sum, o) => sum + widgetSize(o).height + 12, 0);
   const m = 20;
   return {
     x: corner.endsWith('left') ? a.x + m : a.x + a.width - size.width - m,
-    y: corner.startsWith('top') ? a.y + m : a.y + a.height - size.height - m,
+    y: corner.startsWith('top') ? a.y + m + offset : a.y + a.height - size.height - m - offset,
     ...size,
   };
 }
-// Moving it from here (a corner, a new size, a screen change) isn't the user dragging it somewhere.
-let widgetPlacedAt = 0;
-function setWidgetBounds(bounds) {
-  widgetPlacedAt = Date.now();
-  widget.setBounds(bounds);
+
+// Moving one from here (a corner, a new size, a screen change) isn't the user dragging it somewhere.
+const placedAt = new Map();
+function setWidgetBounds(id, bounds) {
+  const bw = widgetWins.get(id);
+  if (!bw) return;
+  placedAt.set(id, Date.now());
+  bw.setBounds(bounds);
 }
-function createWidget() {
-  if (widget || !config.serverUrl) return;
-  const onDesktop = widgetOnDesktop() && !widgetMoving; // while moving it's an ordinary window you can drag
-  widget = new BrowserWindow({
-    ...widgetBounds(), show: false, frame: false, transparent: true, hasShadow: false, resizable: false,
+function placeAll() {
+  for (const w of widgetList()) if (widgetWins.has(w.id) && !w.pos) setWidgetBounds(w.id, widgetBounds(w));
+}
+
+function createWidget(w) {
+  if (widgetWins.has(w.id) || !config.serverUrl) return;
+  const layer = widgetLayer(w);
+  const macDesktop = IS_MAC && layer === 'desktop';
+  const bw = new BrowserWindow({
+    ...widgetBounds(w), show: false, frame: false, transparent: true, hasShadow: false, resizable: false,
     minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, title: 'Capri widget',
-    ...(onDesktop ? { type: 'desktop', focusable: false } : {}),
-    ...(widgetMoving ? { alwaysOnTop: true } : {}),
-    ...(IS_MAC && !onDesktop && !widgetMoving ? { acceptFirstMouse: true } : {}), // a click ticks a task off without first focusing
+    ...(macDesktop ? { type: 'desktop', focusable: false } : {}),
+    ...(IS_MAC && !macDesktop ? { acceptFirstMouse: true } : {}), // a click ticks a task off without first focusing
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });
-  if (IS_MAC) widget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
-  widget.loadURL(widgetUrl());
-  widget.once('ready-to-show', () => {
-    if (widgetMoving) { widget.show(); widget.focus(); return; }
-    widget.showInactive();
-    if (!IS_MAC && !desktopPin.pin(widget)) widget.setAlwaysOnTop(false);
+  widgetWins.set(w.id, bw);
+  if (IS_MAC) bw.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: layer === 'top' });
+  if (layer === 'top') bw.setAlwaysOnTop(true, 'floating');
+  bw.loadURL(widgetUrl(w));
+  bw.once('ready-to-show', () => {
+    if (widgetMoving.has(w.id)) { bw.show(); bw.focus(); return; }
+    bw.showInactive();
+    if (!IS_MAC && layer === 'desktop' && !desktopPin.pin(bw)) bw.setAlwaysOnTop(false);
   });
-  widget.on('focus', () => { if (!IS_MAC && !widgetMoving) desktopPin.sendToBack(widget); });
-  widget.on('moved', () => {
-    if (Date.now() - widgetPlacedAt < 600) return;
-    const [x, y] = widget.getPosition(); saveConfig({ widgetPos: { x, y } }); widgetChanged(); });
-  widget.on('minimize', () => widget.restore());
+  bw.on('focus', () => { if (!IS_MAC && widgetLayer(w) === 'desktop') desktopPin.sendToBack(bw); });
+  bw.on('moved', () => {
+    if (Date.now() - (placedAt.get(w.id) || 0) < 600) return;
+    const [x, y] = bw.getPosition();
+    updateWidget(w.id, { pos: { x, y } });
+    widgetChanged();
+  });
+  bw.on('minimize', () => bw.restore());
   // Right-clicking where the card drags gives Windows' own window menu; show the widget's instead.
-  widget.on('system-context-menu', (e) => { e.preventDefault(); popupWidgetMenu(); });
-  widget.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  widget.webContents.on('will-navigate', (e, url) => { if (!isServer(url)) e.preventDefault(); });
-  widget.on('closed', () => { widget = null; });
+  bw.on('system-context-menu', (e) => { e.preventDefault(); popupWidgetMenu(w.id); });
+  bw.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  bw.webContents.on('will-navigate', (e, url) => { if (!isServer(url)) e.preventDefault(); });
+  bw.on('closed', () => { if (widgetWins.get(w.id) === bw) widgetWins.delete(w.id); });
 }
-function rebuildWidget() {
-  if (widget) widget.destroy();
-  widget = null;
-  if (config.widget) createWidget();
+function rebuildWidget(id) {
+  widgetWins.get(id)?.destroy();
+  widgetWins.delete(id);
+  const w = widgetById(id);
+  if (w?.on) createWidget(w);
 }
-// What Capri's sidebar shows in its widget panel. It's told whenever a setting changes from anywhere.
+const rebuildAll = () => { for (const w of widgetList()) rebuildWidget(w.id); };
+
+// What Capri's widget settings show. Capri is told whenever something changes from anywhere.
 function widgetState() {
   return {
-    on: Boolean(config.widget), kind: widgetKind(), kinds: WIDGET_KINDS,
-    corner: config.widgetPos ? null : config.widgetCorner || 'top-right',
-    size: widgetSize(), defaultSize: WIDGET_SIZES[widgetKind()], customSize: Boolean(config.widgetSizes?.[widgetKind()]),
-    clickable: !widgetOnDesktop(), mac: IS_MAC, moving: widgetMoving,
+    widgets: widgetList().map((w) => ({
+      ...w, size: widgetSize(w), defaultSize: WIDGET_SIZES[w.kind], customSize: Boolean(w.size),
+      corner: w.pos ? null : w.corner || 'top-right', layer: w.layer || 'desktop', moving: widgetMoving.has(w.id),
+    })),
+    kinds: WIDGET_KINDS, layers: WIDGET_LAYERS, mac: IS_MAC, peek: widgetPeek,
   };
 }
 function widgetChanged() {
   tray?.setContextMenu(buildTrayMenu());
   if (win && !win.isDestroyed()) win.webContents.send('capri:widget-changed', widgetState());
 }
-function setWidget(on) {
-  saveConfig({ widget: on });
-  widgetMoving = false;
-  rebuildWidget();
+
+function setWidgetOn(id, on) {
+  updateWidget(id, { on });
+  widgetMoving.delete(id);
+  rebuildWidget(id);
+  placeAll();
   widgetChanged();
 }
-function setWidgetKind(kind) {
+function setWidgetKind(id, kind) {
   if (!WIDGET_SIZES[kind]) return;
-  saveConfig({ widgetKind: kind });
-  rebuildWidget(); // each kind has its own size
+  updateWidget(id, { kind, size: null }); // each kind has its own size
+  rebuildWidget(id);
+  placeAll();
   widgetChanged();
 }
-function placeWidget(corner) {
-  if (!['top-right', 'top-left', 'bottom-right', 'bottom-left'].includes(corner)) return;
-  saveConfig({ widgetCorner: corner, widgetPos: null });
-  if (widget) setWidgetBounds(widgetBounds());
+function setWidgetLayer(id, layer) {
+  if (!WIDGET_LAYERS.some(([l]) => l === layer)) return;
+  updateWidget(id, { layer });
+  widgetMoving.delete(id);
+  rebuildWidget(id);
   widgetChanged();
 }
-function moveWidget() {
-  widgetMoving = true;
-  rebuildWidget();
+function placeWidget(id, corner) {
+  if (!CORNERS.some(([c]) => c === corner)) return;
+  updateWidget(id, { corner, pos: null });
+  placeAll();
   widgetChanged();
 }
-function setWidgetClickable(on) {
-  saveConfig({ widgetClickable: on });
-  widgetMoving = false;
-  rebuildWidget();
+function moveWidget(id) {
+  widgetMoving.add(id);
+  rebuildWidget(id);
   widgetChanged();
 }
-let sizeSave = null;
-function resizeWidget({ width, height }, { now = false } = {}) {
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+const sizeSaves = new Map();
+function resizeWidget(id, { width, height }, { now = false } = {}) {
+  const w = widgetById(id);
+  if (!w || !Number.isFinite(width) || !Number.isFinite(height)) return;
   const size = {
     width: Math.round(Math.min(WIDGET_MAX.width, Math.max(WIDGET_MIN.width, width))),
     height: Math.round(Math.min(WIDGET_MAX.height, Math.max(WIDGET_MIN.height, height))),
   };
-  const save = () => { saveConfig({ widgetSizes: { ...config.widgetSizes, [widgetKind()]: size } }); widgetChanged(); };
-  clearTimeout(sizeSave); // a drag sends many sizes; keep the last
-  if (now) { // picked from the sidebar: a widget in a corner stays tucked into it
+  const save = () => { updateWidget(id, { size }); widgetChanged(); };
+  clearTimeout(sizeSaves.get(id)); // a drag sends many sizes; keep the last
+  if (now) { // picked in Capri: a widget in a corner stays tucked into it
     save();
-    if (widget) { const [x, y] = widget.getPosition(); setWidgetBounds(config.widgetPos ? { x, y, ...size } : widgetBounds()); }
+    const bw = widgetWins.get(id);
+    if (bw) { const [x, y] = bw.getPosition(); setWidgetBounds(id, w.pos ? { x, y, ...size } : widgetBounds(widgetById(id))); }
+    placeAll();
     return;
   }
-  if (widget) { const [x, y] = widget.getPosition(); setWidgetBounds({ x, y, ...size }); }
-  sizeSave = setTimeout(save, 400);
+  const bw = widgetWins.get(id);
+  if (bw) { const [x, y] = bw.getPosition(); setWidgetBounds(id, { x, y, ...size }); }
+  sizeSaves.set(id, setTimeout(save, 400));
 }
-function resetWidgetSize() {
-  const sizes = { ...config.widgetSizes };
-  delete sizes[widgetKind()];
-  saveConfig({ widgetSizes: sizes });
-  if (widget) { const [x, y] = widget.getPosition(); setWidgetBounds(config.widgetPos ? { x, y, ...widgetSize() } : widgetBounds()); }
+function resetWidgetSize(id) {
+  const w = updateWidget(id, { size: null });
+  const bw = widgetWins.get(id);
+  if (bw) { const [x, y] = bw.getPosition(); setWidgetBounds(id, w.pos ? { x, y, ...widgetSize(w) } : widgetBounds(w)); }
+  placeAll();
   widgetChanged();
 }
-// The widget's settings, in the tray / menu-bar menu and on the widget's right-click menu.
-function widgetMenuItems() {
+function addWidget(kind = 'today') {
+  const id = `w${crypto.randomBytes(4).toString('hex')}`;
+  const layer = IS_MAC ? 'normal' : 'desktop';
+  saveConfig({ widgets: [...widgetList(), { id, on: true, kind: WIDGET_SIZES[kind] ? kind : 'today', corner: 'top-right', pos: null, size: null, layer }] });
+  createWidget(widgetById(id));
+  widgetChanged();
+  return id;
+}
+function removeWidget(id) {
+  widgetWins.get(id)?.destroy();
+  widgetWins.delete(id);
+  widgetMoving.delete(id);
+  saveConfig({ widgets: widgetList().filter((w) => w.id !== id) });
+  placeAll();
+  widgetChanged();
+}
+function setWidgetPeek(on) {
+  if (widgetPeek === on) return;
+  widgetPeek = on;
+  rebuildAll();
+}
+function openWidgetStudio(id) {
+  showWindow();
+  win.webContents.send('capri:open-widget-studio', id || null);
+}
+
+// Each widget's settings, in the tray / menu-bar menu and on the widget's right-click menu.
+function widgetMenuItems(id) {
+  const w = widgetById(id);
+  if (!w) return [];
   return [
-    { label: 'Widget shows', submenu: WIDGET_KINDS.map(([id, label]) => ({ label, type: 'radio', checked: widgetKind() === id, click: () => setWidgetKind(id) })) },
+    { label: 'Shows', submenu: WIDGET_KINDS.map(([k, label]) => ({ label, type: 'radio', checked: w.kind === k, click: () => setWidgetKind(id, k) })) },
     {
-      label: 'Widget position',
+      label: 'Position',
       submenu: [
-        ...[['top-right', 'Top right'], ['top-left', 'Top left'], ['bottom-right', 'Bottom right'], ['bottom-left', 'Bottom left']].map(([id, label]) => ({
-          label, type: 'radio', checked: (config.widgetCorner || 'top-right') === id && !config.widgetPos, click: () => placeWidget(id),
-        })),
-        ...(widgetOnDesktop() ? [{ type: 'separator' }, { label: 'Move or resize widget…', click: moveWidget }] : []),
+        ...CORNERS.map(([c, label]) => ({ label, type: 'radio', checked: (w.corner || 'top-right') === c && !w.pos, click: () => placeWidget(id, c) })),
+        ...(IS_MAC && (w.layer || 'desktop') === 'desktop' ? [{ type: 'separator' }, { label: 'Move or resize…', click: () => moveWidget(id) }] : []),
       ],
     },
-    { label: 'Reset widget size', enabled: Boolean(config.widgetSizes?.[widgetKind()]), click: resetWidgetSize },
-    ...(IS_MAC ? [{ label: 'Widget can be clicked', type: 'checkbox', checked: !widgetOnDesktop(), click: (item) => setWidgetClickable(item.checked) }] : []),
+    { label: 'Layer', submenu: WIDGET_LAYERS.map(([l, label]) => ({ label, type: 'radio', checked: (w.layer || 'desktop') === l, click: () => setWidgetLayer(id, l) })) },
+    { label: 'Reset size', enabled: Boolean(w.size), click: () => resetWidgetSize(id) },
   ];
 }
-function popupWidgetMenu() {
-  if (!widget) return;
+function popupWidgetMenu(id) {
+  const bw = widgetWins.get(id);
+  if (!bw) return;
   Menu.buildFromTemplate([
+    { label: 'Customise…', click: () => openWidgetStudio(id) },
     { label: 'Open Capri', click: showWindow },
-    { label: 'Refresh', click: () => widget?.webContents.reload() },
+    { label: 'Refresh', click: () => bw.webContents.reload() },
     { type: 'separator' },
-    ...widgetMenuItems(),
+    ...widgetMenuItems(id),
     { type: 'separator' },
-    { label: 'Hide widget', click: () => setWidget(false) },
-  ]).popup({ window: widget, callback: () => setTimeout(() => tray?.setContextMenu(buildTrayMenu()), 100) }); // ticks match on the Mac menu bar
+    { label: 'Add another widget', click: () => addWidget(widgetById(id)?.kind === 'today' ? 'now' : 'today') },
+    { label: 'Hide this widget', click: () => setWidgetOn(id, false) },
+  ]).popup({ window: bw, callback: () => setTimeout(() => tray?.setContextMenu(buildTrayMenu()), 100) }); // ticks match on the Mac menu bar
 }
-ipcMain.on('capri:widget-menu', (e) => { if (e.sender === widget?.webContents) popupWidgetMenu(); });
+function widgetTrayItems() {
+  const list = widgetList();
+  const kindName = (k) => WIDGET_KINDS.find(([id]) => id === k)?.[1] || k;
+  return [{
+    label: 'Desktop widgets', enabled: Boolean(config.serverUrl),
+    submenu: [
+      ...list.map((w, i) => ({
+        label: `${kindName(w.kind)}${list.filter((o) => o.kind === w.kind).length > 1 ? ` ${i + 1}` : ''}`,
+        submenu: [{ label: 'Show', type: 'checkbox', checked: Boolean(w.on), click: (item) => setWidgetOn(w.id, item.checked) }, { type: 'separator' }, ...widgetMenuItems(w.id),
+          { type: 'separator' }, { label: 'Remove', click: () => removeWidget(w.id) }],
+      })),
+      ...(list.length ? [{ type: 'separator' }] : []),
+      { label: 'Add a widget', click: () => addWidget(list.some((w) => w.kind === 'today') ? 'now' : 'today') },
+      { label: 'Customise widgets…', click: () => openWidgetStudio() },
+    ],
+  }];
+}
+
+// From the widget windows
+ipcMain.on('capri:widget-menu', (e) => { const id = idOfSender(e.sender); if (id) popupWidgetMenu(id); });
+ipcMain.on('capri:widget-resize', (e, size) => { const id = idOfSender(e.sender); if (id) resizeWidget(id, size || {}); });
+ipcMain.on('capri:widget-done', (e) => {
+  const id = idOfSender(e.sender);
+  if (!id || !widgetMoving.has(id)) return;
+  const [x, y] = widgetWins.get(id).getPosition();
+  updateWidget(id, { pos: { x, y } });
+  widgetMoving.delete(id);
+  rebuildWidget(id);
+  widgetChanged();
+});
+// From Capri's widget settings, in the main window only
+const fromMain = (e) => e.sender === win?.webContents;
 ipcMain.handle('capri:widget-get', () => widgetState());
-// The sidebar's widget panel, in the main window.
-ipcMain.handle('capri:widget-set', (e, changes = {}) => {
-  if (e.sender !== win?.webContents) return widgetState();
-  if ('on' in changes) setWidget(Boolean(changes.on));
-  if (changes.kind) setWidgetKind(changes.kind);
-  if (changes.corner) placeWidget(changes.corner);
-  if (changes.size === 'reset') resetWidgetSize();
-  else if (changes.size) resizeWidget(changes.size, { now: true });
-  if ('clickable' in changes && IS_MAC) setWidgetClickable(Boolean(changes.clickable));
-  if (changes.move && widgetOnDesktop() && config.widget) moveWidget();
+ipcMain.handle('capri:widget-update', (e, id, changes = {}) => {
+  if (!fromMain(e) || !widgetById(id)) return widgetState();
+  if ('on' in changes) setWidgetOn(id, Boolean(changes.on));
+  if (changes.kind) setWidgetKind(id, changes.kind);
+  if (changes.layer) setWidgetLayer(id, changes.layer);
+  if (changes.corner) placeWidget(id, changes.corner);
+  if (changes.size === 'reset') resetWidgetSize(id);
+  else if (changes.size) resizeWidget(id, changes.size, { now: true });
+  if (changes.move && IS_MAC && widgetById(id).on) moveWidget(id);
+  if (changes.reload) widgetWins.get(id)?.webContents.reload();
   return widgetState();
 });
-ipcMain.on('capri:widget-resize', (e, size) => { if (e.sender === widget?.webContents) resizeWidget(size || {}); });
-ipcMain.on('capri:widget-done', () => {
-  if (!widgetMoving) return;
-  if (widget) { const [x, y] = widget.getPosition(); saveConfig({ widgetPos: { x, y } }); }
-  widgetMoving = false;
-  rebuildWidget();
-  widgetChanged();
+ipcMain.handle('capri:widget-add', (e, kind) => { if (fromMain(e)) addWidget(kind); return widgetState(); });
+ipcMain.handle('capri:widget-remove', (e, id) => { if (fromMain(e)) removeWidget(id); return widgetState(); });
+ipcMain.handle('capri:widget-peek', (e, on) => { if (fromMain(e)) setWidgetPeek(Boolean(on)); return widgetState(); });
+// 0.5.9's single-widget calls, for a page cached from before: they act on the first widget.
+ipcMain.handle('capri:widget-set', (e, changes = {}) => {
+  const first = widgetList()[0] || { id: addWidget('now') };
+  if (fromMain(e)) {
+    if ('on' in changes) setWidgetOn(first.id, Boolean(changes.on));
+    if (changes.kind) setWidgetKind(first.id, changes.kind);
+    if (changes.corner) placeWidget(first.id, changes.corner);
+    if (changes.size === 'reset') resetWidgetSize(first.id);
+    else if (changes.size) resizeWidget(first.id, changes.size, { now: true });
+  }
+  return widgetState();
 });
 ipcMain.on('capri:open', () => showWindow());
 
@@ -334,6 +457,9 @@ function createWindow() {
   win.on('blur', () => { if (raised) { raised = false; if (config.pinned) desktopPin.sendToBack(win); } });
   win.on('minimize', () => { if (config.pinned) win.restore(); });
   win.on('restore', repaint);
+  // Widgets float on top only while Capri's widget settings are open and in view.
+  win.on('hide', () => setWidgetPeek(false));
+  win.webContents.on('did-start-loading', () => setWidgetPeek(false));
 
   // Closing hides to the tray so Capri stays running.
   win.on('close', (e) => {
@@ -435,8 +561,7 @@ function buildTrayMenu() {
       visible: process.platform === 'win32', enabled: desktopPin.available(),
       click: (item) => setPinned(item.checked),
     },
-    { label: 'Desktop widget', type: 'checkbox', checked: Boolean(config.widget), enabled: Boolean(config.serverUrl), click: (item) => setWidget(item.checked) },
-    ...widgetMenuItems().map((item) => ({ ...item, enabled: Boolean(config.widget) && item.enabled !== false })),
+    ...widgetTrayItems(),
     {
       label: 'Always on top', type: 'checkbox', checked: Boolean(config.alwaysOnTop), enabled: !config.pinned,
       click: (item) => { win.setAlwaysOnTop(item.checked); saveConfig({ alwaysOnTop: item.checked }); },
@@ -552,10 +677,10 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     createWindow();
     createTray();
-    if (config.widget) createWidget();
-    // The widget keeps to its corner when screens are added, removed or resized.
-    screen.on('display-metrics-changed', () => widget && setWidgetBounds(widgetBounds()));
-    screen.on('display-removed', () => widget && setWidgetBounds(widgetBounds()));
+    for (const w of widgetList()) if (w.on) createWidget(w);
+    // Widgets keep to their corners when screens are added, removed or resized.
+    screen.on('display-metrics-changed', placeAll);
+    screen.on('display-removed', () => { for (const w of widgetList()) if (widgetWins.has(w.id)) setWidgetBounds(w.id, widgetBounds(w)); });
     globalShortcut.register(QUICK_ADD_SHORTCUT, quickAdd);
     setupUpdates();
     // First launch: start with Windows unless the user turns it off from the tray.

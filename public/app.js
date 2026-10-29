@@ -2248,8 +2248,9 @@ document.addEventListener('change', (e) => {
 
 // ---------- desktop widget and the pinned strip ----------
 // The desktop app's widget window loads Capri with ?widget=<kind> and shows one small card: what's on now,
-// today's tasks, the focus timer, or upcoming deadlines. With &move=1 (Mac) it can be dragged, then Done.
-// Its corner resizes it, a right-click opens its menu, and a tick on a task completes it.
+// today's tasks, the focus timer, or upcoming deadlines; &id=<id> says which widget, for its look. With
+// &move=1 (Mac) it can be dragged, then Done. Its corner resizes it, a right-click opens its menu, and a tick
+// on a task completes it. &preview=1 is the widget studio's live preview.
 // The full window, pinned to the desktop, shows what's on now as a slim strip above the page.
 const widgetParams = new URLSearchParams(location.search);
 const WIDGET = widgetParams.has('widget') && (['now', 'today', 'focus', 'deadlines'].includes(widgetParams.get('widget')) ? widgetParams.get('widget') : 'now');
@@ -2266,47 +2267,87 @@ function nowParts() {
   return null;
 }
 
-// How the widget looks, set from the sidebar's widget panel. Kept in this browser's storage, which the
-// widget window shares with the app, so it changes as soon as you pick something.
-const WIDGET_STYLE = { bg: 'glass', opacity: 82, accent: '', text: 1, header: true, open: true, bar: true, checks: true, overdue: true };
-const widgetStyle = () => ({ ...WIDGET_STYLE, ...store.get('widgetStyle', {}) });
-const WIDGET_ACCENTS = ['#e8505b', '#f29d38', '#e2b53a', '#4fb36a', '#2fb5a6', '#3f9be0', '#6a6ff0', '#b462d8', '#ec6fa9'];
+// How each widget looks and what it shows, set in Capri's widget studio (sidebar → widget button). Kept in
+// this browser's storage, which the widget windows share with the app, so a widget changes as you pick.
+const WIDGET_ID = (widgetParams.get('id') || 'w1').replace(/[^\w-]/g, '').slice(0, 24) || 'w1';
+const WIDGET_STYLE = {
+  preset: 'capri',
+  // look
+  theme: 'auto', bg: 'glass', opacity: 82, blur: 20, radius: 20, border: 'subtle', shadow: false, accent: '',
+  font: 'system', text: 1, density: 'cozy', boldTitle: true, accentTitle: false, align: 'left',
+  // what shows
+  title: '', header: true, clock: false, open: true, count: true,
+  bar: true, next: true, until: true, // Right now
+  checks: true, prio: true, times: true, projects: false, overdue: true, sort: 'smart', // Today
+  task: true, // Focus
+  range: 'all', dlStyle: 'countdown', // Deadlines
+};
+const LOOK_KEYS = ['theme', 'bg', 'opacity', 'blur', 'radius', 'border', 'shadow', 'accent', 'font', 'text', 'density', 'boldTitle', 'accentTitle', 'align'];
+const WIDGET_PRESETS = [
+  ['capri', 'Capri', {}],
+  ['frosted', 'Frosted', { opacity: 42, blur: 34, radius: 26 }],
+  ['minimal', 'Minimal', { bg: 'clear', border: 'none', boldTitle: false }],
+  ['paper', 'Paper', { theme: 'light', bg: 'solid', opacity: 100, radius: 8, font: 'serif', shadow: true, accent: '#b5532f' }],
+  ['midnight', 'Midnight', { theme: 'dark', bg: 'solid', opacity: 94, radius: 22, border: 'accent', accent: '#6a6ff0' }],
+  ['neon', 'Neon', { theme: 'dark', bg: 'gradient', opacity: 88, border: 'accent', accent: '#ec6fa9', accentTitle: true, font: 'rounded', shadow: true }],
+  ['sunny', 'Sunny', { theme: 'light', bg: 'tint', opacity: 92, radius: 24, accent: '#f29d38', accentTitle: true, font: 'rounded' }],
+  ['terminal', 'Terminal', { theme: 'dark', bg: 'solid', opacity: 96, radius: 6, border: 'accent', accent: '#4fb36a', accentTitle: true, font: 'mono' }],
+  ['poster', 'Poster', { theme: 'dark', bg: 'gradient', opacity: 100, radius: 28, accent: '#e8505b', text: 1.15, density: 'roomy', accentTitle: false }],
+];
+const WIDGET_ACCENTS = ['#e8505b', '#f29d38', '#e2b53a', '#4fb36a', '#2fb5a6', '#3f9be0', '#6a6ff0', '#b462d8', '#ec6fa9', '#8a8fa8'];
+const WIDGET_ROW = { compact: 24, cozy: 29, roomy: 34 };
+const styleKey = (id) => `widgetStyle:${id}`;
+function widgetStyle(id = WIDGET_ID) {
+  let saved = store.get(styleKey(id), null);
+  if (!saved && id === 'w1') saved = store.get('widgetStyle', {}); // 0.5.9 kept one look for its one widget
+  return { ...WIDGET_STYLE, ...saved };
+}
+const saveWidgetStyle = (id, changes) => store.set(styleKey(id), { ...widgetStyle(id), ...changes });
 
 const wDone = new Map(); // task id → timer: ticked off on the widget, still shown a moment so it can be unticked
-// As many 29px rows as the widget's height has room for, under its header (and a "+N more" line), at its text size.
-function widgetRows(more = false) {
-  const st = widgetStyle();
-  const z = st.text;
-  const head = st.header || WIDGET_MOVE ? 21 * z : 0;
-  return Math.max(1, Math.floor((innerHeight - 36 - head - (more ? 20 * z : 0)) / (29 * z)));
+// What to draw: which kind, whose look, at what size. The widget window draws itself; the studio draws a preview.
+const widgetCtx = () => ({ kind: WIDGET, id: WIDGET_ID, st: widgetStyle(), width: innerWidth, height: innerHeight, move: WIDGET_MOVE, live: true });
+// As many rows as the widget's height has room for, under its header (and a "+N more" line), at its text size and spacing.
+function widgetRows(c, more = false) {
+  const z = c.st.text;
+  const pad = c.st.density === 'compact' ? 18 : c.st.density === 'roomy' ? 32 : 24;
+  const head = c.st.header || c.move ? 22 * z : 0;
+  return Math.max(1, Math.floor((c.height - 12 - pad - head - (more ? 20 * z : 0) + 3 * z) / ((WIDGET_ROW[c.st.density] || 29) * z)));
 }
-const wCheck = (x, prio = '') => !widgetStyle().checks ? '' : `<button class="w-check ${prio} ${wDone.has(x.id) ? 'on' : ''}" data-widget-check="${x.id}" title="${wDone.has(x.id) ? 'Undo' : 'Complete'}">${ic('check')}</button>`;
+const wCheck = (c, x, prio = '') => (!c.st.checks ? '' : `<button class="w-check ${c.st.prio ? prio : ''} ${wDone.has(x.id) ? 'on' : ''}" data-widget-check="${x.id}" title="${wDone.has(x.id) ? 'Undo' : 'Complete'}">${ic('check')}</button>`);
 const wRowClass = (x) => `w-row${wDone.has(x.id) ? ' done' : ''}`;
+const shortDate = (day) => new Date(`${day}T00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' });
 
 const WIDGET_LABELS = { now: ['clock', 'Right now'], today: ['sun', 'Today'], focus: ['timer', 'Focus'], deadlines: ['flag', 'Deadlines'] };
 
-function widgetBody() {
-  if (WIDGET === 'today') {
+function widgetBody(c) {
+  const st = c.st;
+  if (c.kind === 'today') {
     const t = today();
-    const late = widgetStyle().overdue;
-    const list = sortTasks(openTasks().filter((x) => dueDay(x) && (late ? dueDay(x) <= t : dueDay(x) === t) && !x.parent_id), 'smart');
+    const list = sortTasks(openTasks().filter((x) => dueDay(x) && (st.overdue ? dueDay(x) <= t : dueDay(x) === t) && !x.parent_id), st.sort);
     if (!list.length) return { body: `<div class="w-title">All clear</div><div class="w-left">Nothing due today.</div>` };
-    const shown = list.slice(0, list.length > widgetRows() ? widgetRows(true) : list.length);
+    const shown = list.slice(0, list.length > widgetRows(c) ? widgetRows(c, true) : list.length);
+    const when = (x) => (dueDay(x) < t ? '<span class="w-when late">late</span>' : st.times && dueTime(x) ? `<span class="w-when">${esc(dueTime(x))}</span>` : '');
     return {
       count: list.length - wDone.size,
-      body: `<div class="w-list">${shown.map((x) => `<div class="${wRowClass(x)}">${wCheck(x, prioClass(x.priority))}<span class="w-name">${esc(plain(x.content))}</span>${
-        dueDay(x) < t ? '<span class="w-when late">late</span>' : dueTime(x) ? `<span class="w-when">${esc(dueTime(x))}</span>` : ''}</div>`).join('')}</div>
+      body: `<div class="w-list">${shown.map((x) => `<div class="${wRowClass(x)}">${wCheck(c, x, prioClass(x.priority))}<span class="w-name">${esc(plain(x.content))}${
+        st.projects && projectById(x.project_id) ? `<span class="w-proj">${esc(projectName(projectById(x.project_id)))}</span>` : ''}</span>${when(x)}</div>`).join('')}</div>
         ${list.length > shown.length ? `<div class="w-next">+${list.length - shown.length} more</div>` : ''}`,
     };
   }
-  if (WIDGET === 'deadlines') {
-    const list = openTasks().filter((x) => deadlineDay(x)).sort((a, b) => deadlineDay(a).localeCompare(deadlineDay(b))).slice(0, widgetRows());
-    if (!list.length) return { body: `<div class="w-title">No deadlines</div><div class="w-left">Nothing with a deadline coming up.</div>` };
+  if (c.kind === 'deadlines') {
+    const limit = st.range === 'all' ? '9999' : ymd(addDays(new Date(), Number(st.range)));
+    const all = openTasks().filter((x) => deadlineDay(x) && deadlineDay(x) <= limit).sort((a, b) => deadlineDay(a).localeCompare(deadlineDay(b)));
+    if (!all.length) return { body: `<div class="w-title">No deadlines</div><div class="w-left">${st.range === 'all' ? 'Nothing with a deadline coming up.' : `Nothing due in the next ${st.range} days.`}</div>` };
+    const list = all.slice(0, all.length > widgetRows(c) ? widgetRows(c, true) : all.length);
     return {
-      body: `<div class="w-list">${list.map((x) => `<div class="${wRowClass(x)}">${wCheck(x)}<span class="w-name">${esc(plain(x.content))}</span><span class="w-when ${dlClass(deadlineDay(x))}">${esc(countdown(deadlineDay(x)))}</span></div>`).join('')}</div>`,
+      count: all.length,
+      body: `<div class="w-list">${list.map((x) => `<div class="${wRowClass(x)}">${wCheck(c, x)}<span class="w-name">${esc(plain(x.content))}</span><span class="w-when ${dlClass(deadlineDay(x))}">${
+        esc(st.dlStyle === 'date' ? shortDate(deadlineDay(x)) : countdown(deadlineDay(x)))}</span></div>`).join('')}</div>
+        ${all.length > list.length ? `<div class="w-next">+${all.length - list.length} more</div>` : ''}`,
     };
   }
-  if (WIDGET === 'focus') {
+  if (c.kind === 'focus') {
     const tm = store.get('timer', { mode: 'focus', remaining: TIMER_LEN.focus, running: false, endAt: 0, taskId: null }); // the app's latest
     const left = tm.running ? Math.max(0, Math.round((tm.endAt - Date.now()) / 1000)) : tm.remaining;
     const task = tm.taskId && taskById(tm.taskId);
@@ -2314,8 +2355,8 @@ function widgetBody() {
       on: tm.running,
       label: tm.mode === 'break' ? 'Break' : tm.running ? 'Focusing' : 'Focus',
       body: `<div class="w-clock"><span class="w-time">${mmss(left)}</span><span class="w-state">${tm.running ? '' : 'paused'}</span></div>
-        <div class="w-bar ${tm.mode === 'break' ? 'brk' : ''}"><span style="width:${(1 - left / TIMER_LEN[tm.mode]) * 100}%"></span></div>
-        <div class="w-next">${task ? esc(plain(task.content)) : 'No task linked'}</div>`,
+        ${st.bar ? `<div class="w-bar ${tm.mode === 'break' ? 'brk' : ''}"><span style="width:${(1 - left / TIMER_LEN[tm.mode]) * 100}%"></span></div>` : ''}
+        ${st.task ? `<div class="w-next">${task ? esc(plain(task.content)) : 'No task linked'}</div>` : ''}`,
     };
   }
   const p = nowParts();
@@ -2323,32 +2364,46 @@ function widgetBody() {
   return {
     on: p.on,
     body: `<div class="w-title">${esc(p.title)}</div>
-      <div class="w-left"><b>${esc(p.left)}</b> ${esc(p.until)}</div>
-      ${p.on ? `<div class="w-bar"><span style="width:${p.pct}%"></span></div>` : ''}
-      ${p.next ? `<div class="w-next">Next: ${esc(p.next.title)} · ${esc(fmtTime(p.next.start))}</div>` : ''}`,
+      <div class="w-left"><b>${esc(p.left)}</b>${st.until ? ` ${esc(p.until)}` : ''}</div>
+      ${p.on && st.bar ? `<div class="w-bar"><span style="width:${p.pct}%"></span></div>` : ''}
+      ${p.next && st.next ? `<div class="w-next">Next: ${esc(p.next.title)} · ${esc(fmtTime(p.next.start))}</div>` : ''}`,
   };
+}
+
+// Draws a widget card into el.
+function paintWidget(el, c, { signedOut = false } = {}) {
+  const st = c.st;
+  const theme = st.theme !== 'auto' && THEMES[st.theme] ? st.theme : store.get('theme', 'dark');
+  // Its own light or dark look, whatever the app's theme: the whole window for a widget, the card for a preview.
+  if (c.live) document.documentElement.dataset.theme = theme;
+  else el.dataset.wtheme = theme;
+  const w = signedOut ? { body: '<div class="w-title">Open Capri to sign in</div>' } : widgetBody(c);
+  const [icon, label] = WIDGET_LABELS[c.kind];
+  const open = (window.capriDesktop?.openApp || !c.live) && !c.move && st.open ? `<button class="w-open" data-widget-open title="Open Capri" tabindex="-1">${ic('external')}</button>` : '';
+  const done = c.move ? '<button class="w-done" data-widget-done>Done</button>' : '';
+  el.className = ['wcard', `w-${c.kind}`, w.on && 'now', c.move && 'moving', st.accent && 'tinted', st.accentTitle && 'accent-title',
+    !st.boldTitle && 'light-title', st.shadow && 'shadowed'].filter(Boolean).join(' ');
+  Object.assign(el.dataset, { bg: st.bg, border: st.border, font: st.font, density: st.density, align: st.align });
+  el.style.setProperty('--wbg', `${st.opacity}%`);
+  el.style.setProperty('--wblur', `${st.blur}px`);
+  el.style.setProperty('--wr', `${st.radius}px`);
+  el.style.setProperty('--wrow', `${WIDGET_ROW[st.density] || 29}px`);
+  if (st.accent) { el.style.setProperty('--accent', st.accent); el.style.setProperty('--accent-2', `color-mix(in srgb, ${st.accent} 55%, #fff)`); }
+  else { el.style.removeProperty('--accent'); el.style.removeProperty('--accent-2'); }
+  // The clock and Right now cards grow with the widget; the lists show more rows instead.
+  const grow = c.kind === 'now' || c.kind === 'focus' ? Math.min(c.width / 300, c.height / 132) : 1;
+  el.style.setProperty('--wz', Math.min(3, Math.max(0.7, grow * st.text)).toFixed(3));
+  const title = c.move ? 'Drag to place' : esc(st.title || w.label || label);
+  const clock = st.clock && !c.move ? `<span class="w-hclock">${esc(new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</span>` : '';
+  const count = w.count && st.count && !c.move ? ` <span class="w-count">${w.count}</span>` : '';
+  const top = st.header || c.move ? `<div class="w-top"><span class="w-label">${ic(icon)} ${title}${count}</span>${clock}${open}${done}</div>` : '';
+  el.innerHTML = top + w.body;
 }
 
 function renderWidget({ signedOut = false } = {}) {
   let el = $('#widget');
   if (!el) { el = document.createElement('div'); el.id = 'widget'; document.body.append(el); }
-  const w = signedOut ? { body: '<div class="w-title">Open Capri to sign in</div>' } : widgetBody();
-  const [icon, label] = WIDGET_LABELS[WIDGET];
-  const st = widgetStyle();
-  const open = window.capriDesktop?.openApp && !WIDGET_MOVE && st.open ? `<button class="w-open" data-widget-open title="Open Capri">${ic('external')}</button>` : '';
-  const done = WIDGET_MOVE ? '<button class="w-done" data-widget-done>Done</button>' : '';
-  el.className = `wcard w-${WIDGET} ${w.on ? 'now' : ''} ${WIDGET_MOVE ? 'moving' : ''} ${st.bar ? '' : 'no-bar'}`;
-  el.dataset.bg = st.bg;
-  el.style.setProperty('--wbg', `${st.opacity}%`);
-  if (st.accent) { el.style.setProperty('--accent', st.accent); el.style.setProperty('--accent-2', `color-mix(in srgb, ${st.accent} 60%, #fff)`); }
-  else { el.style.removeProperty('--accent'); el.style.removeProperty('--accent-2'); }
-  // The clock and Right now cards grow with the widget; the lists show more rows instead.
-  const grow = WIDGET === 'now' || WIDGET === 'focus' ? Math.min(innerWidth / 300, innerHeight / 132) : 1;
-  el.style.setProperty('--wz', Math.min(3, Math.max(0.8, grow * st.text)).toFixed(3));
-  const title = WIDGET_MOVE ? 'Drag to place' : esc(w.label || label);
-  const top = st.header || WIDGET_MOVE
-    ? `<div class="w-top"><span class="w-label">${ic(icon)} ${title}${w.count && !WIDGET_MOVE ? ` <span class="w-count">${w.count}</span>` : ''}</span>${open}${done}</div>` : '';
-  el.innerHTML = top + w.body;
+  paintWidget(el, widgetCtx(), { signedOut });
 }
 
 async function bootWidget() {
@@ -2369,9 +2424,12 @@ async function bootWidget() {
   await load();
   setInterval(renderWidget, WIDGET === 'focus' ? 1000 : 20000); // the timer ticks; the rest counts down by the minute
   setInterval(load, 2 * 60000); // changes made elsewhere
-  addEventListener('storage', (e) => { if (e.key === 'tdp:timer') renderWidget(); }); // the app started, paused or reset the timer
-  addEventListener('storage', (e) => { if (e.key === 'tdp:changed') load(); }); // the app synced something new
-  addEventListener('storage', (e) => { if (e.key === 'tdp:widgetStyle') renderWidget(); }); // changed in the sidebar's widget panel
+  addEventListener('storage', (e) => {
+    if (e.key === 'tdp:changed') load(); // the app synced something new
+    // the app started, paused or reset the timer; the look changed in the studio; the app's theme changed
+    if (['tdp:timer', `tdp:${styleKey(WIDGET_ID)}`, 'tdp:widgetStyle', 'tdp:theme'].includes(e.key)) setTimeout(renderWidget);
+  });
+  addEventListener('resize', () => renderWidget());
   document.addEventListener('click', (e) => {
     if (e.target.closest('[data-widget-open]')) window.capriDesktop?.openApp?.();
     if (e.target.closest('[data-widget-done]')) window.capriDesktop?.widgetDone?.();
@@ -2379,7 +2437,6 @@ async function bootWidget() {
     if (check) widgetCheck(check.dataset.widgetCheck, load);
   });
   document.addEventListener('contextmenu', (e) => { e.preventDefault(); window.capriDesktop?.widgetMenu?.(); });
-  addEventListener('resize', () => renderWidget());
   if (window.capriDesktop?.widgetResize && !WIDGET_MOVE) widgetGrip();
 }
 
@@ -2421,102 +2478,291 @@ function widgetGrip() {
   grip.addEventListener('pointercancel', end);
 }
 
-// ---------- the sidebar's widget panel (desktop app) ----------
-// In the Windows and Mac app, a button by the bell opens the desktop widget's settings: on or off, what
-// it shows, where it sits, its size, and how it looks.
+// ---------- the widget studio (desktop app) ----------
+// In the Windows and Mac app, the widget button by the bell opens every desktop widget's settings, with a
+// live preview: add and remove widgets, what each shows, where it sits and on which layer, its size, a
+// ready-made style or every part of its look, and which details it shows.
 const desktopWidget = () => typeof window.capriDesktop?.widgetSettings === 'function';
-const WIDGET_SIZE_STEPS = [['Small', 0.8], ['Default', 1], ['Large', 1.3], ['Huge', 1.6]];
-const WIDGET_TEXT_STEPS = [['Small', 0.9], ['Normal', 1], ['Large', 1.15], ['Larger', 1.3]];
-let widgetState = null;
-
-function widgetMenuHtml() {
-  const ws = widgetState;
-  const st = widgetStyle();
-  const chip = (attr, value, label, on) => `<button class="ctx-p ${on ? 'on' : ''}" ${attr}="${esc(String(value))}">${esc(label)}</button>`;
-  const flag = (k, label) => `<button class="dd-opt remind-opt ${st[k] ? 'on' : ''}" data-w-flag="${k}">${ic('check')}<span class="dd-text">${label}</span></button>`;
-  const sizeOn = (f) => (ws.customSize ? Math.round(ws.defaultSize.width * f) === ws.size.width && Math.round(ws.defaultSize.height * f) === ws.size.height : f === 1);
-  const corners = [['top-left', 'Top left'], ['top-right', 'Top right'], ['bottom-left', 'Bottom left'], ['bottom-right', 'Bottom right']];
-  return `<div class="ctx-note remind-status ${ws.on ? 'on' : ''}">${ic('widget')}<span><b>Desktop widget ${ws.on ? 'on' : 'off'}</b><br>${
-      ws.on ? 'On your desktop, behind your windows. Drag it to move it, drag its corner to resize it.' : 'A small card on your desktop: what’s on now, today’s tasks, the focus timer or deadlines.'}</span></div>
-    <button class="dd-opt ${ws.on ? '' : 'strong'}" data-w-on="${ws.on ? '' : '1'}">${ic('widget')}<span class="dd-text">${ws.on ? 'Turn off the widget' : 'Turn on the widget'}</span></button>
-    <div class="ctx-sep"></div>
-    <div class="remind-label">Shows</div>
-    <div class="ctx-prio remind-lead w-grid">${ws.kinds.map(([id, label]) => chip('data-w-kind', id, label, ws.kind === id)).join('')}</div>
-    <div class="remind-label">Position${ws.corner ? '' : ' <span class="w-sub">· where you dragged it</span>'}</div>
-    <div class="ctx-prio remind-lead w-grid">${corners.map(([id, label]) => chip('data-w-corner', id, label, ws.corner === id)).join('')}</div>
-    <div class="remind-label">Size${ws.customSize && !WIDGET_SIZE_STEPS.some(([, f]) => sizeOn(f)) ? ` <span class="w-sub">· ${ws.size.width} × ${ws.size.height}</span>` : ''}</div>
-    <div class="ctx-prio remind-lead">${WIDGET_SIZE_STEPS.map(([label, f]) => chip('data-w-size', f, label, sizeOn(f))).join('')}</div>
-    <div class="ctx-sep"></div>
-    <div class="remind-label">Background</div>
-    <div class="ctx-prio remind-lead">${[['glass', 'Glass'], ['solid', 'Solid'], ['clear', 'Clear']].map(([id, label]) => chip('data-w-bg', id, label, st.bg === id)).join('')}</div>
-    ${st.bg === 'clear' ? '' : `<label class="w-range"><span>Opacity</span><input type="range" min="30" max="100" step="1" value="${st.opacity}" data-w-opacity><b>${st.opacity}%</b></label>`}
-    <div class="remind-label">Colour</div>
-    <div class="w-swatches"><button class="w-swatch theme ${st.accent ? '' : 'on'}" data-w-accent="" title="Match the theme"></button>${
-      WIDGET_ACCENTS.map((c) => `<button class="w-swatch ${st.accent === c ? 'on' : ''}" data-w-accent="${c}" style="--sw:${c}" title="${c}"></button>`).join('')}</div>
-    <div class="remind-label">Text size</div>
-    <div class="ctx-prio remind-lead">${WIDGET_TEXT_STEPS.map(([label, f]) => chip('data-w-text', f, label, st.text === f)).join('')}</div>
-    <div class="remind-label">Show</div>
-    ${flag('header', 'Title bar')}${flag('open', 'Open Capri button')}${flag('bar', 'Progress bars')}${flag('checks', 'Tick boxes on tasks')}${flag('overdue', 'Late tasks in Today')}
-    ${ws.mac ? `<div class="ctx-sep"></div>
-      <button class="dd-opt remind-opt ${ws.clickable ? 'on' : ''}" data-w-clickable>${ic('check')}<span class="dd-text">Can be clicked <span class="w-sub">(off: sits behind your desktop icons)</span></span></button>
-      ${!ws.clickable && ws.on ? `<button class="dd-opt" data-w-move>${ic('swap')}<span class="dd-text">Move or resize widget…</span></button>` : ''}` : ''}`;
+const WIDGET_SIZE_STEPS = [['S', 0.8], ['M', 1], ['L', 1.3], ['XL', 1.6]];
+const WIDGET_WALLS = [['dusk', 'Dusk'], ['ocean', 'Ocean'], ['forest', 'Forest'], ['light', 'Light'], ['dark', 'Dark']];
+const LAYER_HINTS = {
+  desktop: 'Sits on the desktop, behind every window.',
+  normal: 'An ordinary window: other windows can cover it.',
+  top: 'Always above your other windows.',
+};
+// 0.5.9's app has one widget and a simpler set of calls; make it look like the list the studio expects.
+const deskWidgets = {
+  get multi() { return typeof window.capriDesktop?.updateWidget === 'function'; },
+  wrap(s) {
+    if (!s || s.widgets) return s;
+    return {
+      legacy: true, mac: s.mac, kinds: s.kinds,
+      layers: s.mac ? [['desktop', 'On the desktop'], ['normal', 'Normal window']] : [['desktop', 'On the desktop']],
+      widgets: [{ id: 'w1', on: s.on, kind: s.kind, corner: s.corner, size: s.size, defaultSize: s.defaultSize, customSize: s.customSize, layer: s.mac && s.clickable ? 'normal' : 'desktop' }],
+    };
+  },
+  async state() { return this.wrap(await window.capriDesktop.widgetSettings()); },
+  async update(id, changes) {
+    if (this.multi) return window.capriDesktop.updateWidget(id, changes);
+    const c = { ...changes };
+    if (c.layer) c.clickable = c.layer !== 'desktop';
+    return this.wrap(await window.capriDesktop.setWidgetSettings(c));
+  },
+};
+const studio = { open: false, id: null, wall: store.get('widgetWall', 'dusk'), peek: store.get('widgetPeek', true), state: null, add: false };
+const studioWidget = () => studio.state?.widgets.find((w) => w.id === studio.id);
+const kindLabel = (k) => studio.state?.kinds.find(([id]) => id === k)?.[1] || k;
+function widgetName(w) {
+  const same = studio.state.widgets.filter((o) => o.kind === w.kind);
+  return `${kindLabel(w.kind)}${same.length > 1 ? ` ${same.indexOf(w) + 1}` : ''}`;
 }
 
-function refreshWidgetMenu() {
-  if (!ctxMenu?.classList.contains('widget-menu')) return;
-  const scroll = ctxMenu.scrollTop;
-  ctxMenu.innerHTML = widgetMenuHtml();
-  ctxMenu.scrollTop = scroll;
+function studioTabsHtml() {
+  const s = studio.state;
+  return `${s.widgets.map((w) => `<button class="ws-tab ${w.id === studio.id ? 'on' : ''} ${w.on ? 'shown' : ''}" data-ws-tab="${esc(w.id)}" title="${w.on ? 'Showing' : 'Hidden'}">
+      ${ic(WIDGET_LABELS[w.kind]?.[0] || 'widget')}<span>${esc(widgetStyle(w.id).title || widgetName(w))}</span><i class="ws-dot"></i></button>`).join('')}
+    ${s.legacy ? '' : `<span class="ws-addwrap"><button class="ws-tab ws-add" data-ws-add>${ic('plus')}<span>Add widget</span></button>${studio.add
+      ? `<span class="ws-addmenu">${s.kinds.map(([k, label]) => `<button data-ws-addkind="${k}">${ic(WIDGET_LABELS[k][0])} ${esc(label)}</button>`).join('')}</span>` : ''}</span>`}`;
 }
 
-async function setWidgetSettings(changes) {
-  try { widgetState = await window.capriDesktop.setWidgetSettings(changes); } catch (err) { return toast(err.message); }
-  $('#widget-btn')?.classList.toggle('on', widgetState.on);
-  refreshWidgetMenu();
+function studioSettingsHtml() {
+  const s = studio.state;
+  const w = studioWidget();
+  if (!w) return `<div class="ws-empty">${ic('widget')}<b>No widgets yet</b><span>Add one to put today’s tasks, what’s on now, the focus timer or deadlines on your desktop.</span></div>`;
+  const st = widgetStyle(w.id);
+  const seg = (scope, k, opts, cur, cls = '') => `<div class="ws-seg ${cls}">${opts.map(([v, label]) => `<button class="${String(cur) === String(v) ? 'on' : ''}" data-ws="${scope}" data-k="${k}" data-v="${esc(String(v))}">${label}</button>`).join('')}</div>`;
+  const row = (label, control, hint = '') => `<div class="ws-row"><div class="ws-rl"><span>${label}</span>${hint ? `<small>${hint}</small>` : ''}</div>${control}</div>`;
+  const sw = (k, label, hint = '') => `<label class="ws-switch-row"><span class="ws-rl"><span>${label}</span>${hint ? `<small>${hint}</small>` : ''}</span><input type="checkbox" class="ws-switch" data-ws-flag="${k}" ${st[k] ? 'checked' : ''}></label>`;
+  const slider = (k, label, min, max, step, unit) => `<div class="ws-row"><div class="ws-rl"><span>${label}</span></div><div class="ws-slider"><input type="range" min="${min}" max="${max}" step="${step}" value="${st[k]}" data-ws-range="${k}"><b>${st[k]}${unit}</b></div></div>`;
+  const sizeOn = (f) => (w.customSize ? Math.round(w.defaultSize.width * f) === w.size.width && Math.round(w.defaultSize.height * f) === w.size.height : f === 1);
+  const corner = (c) => `<button class="ws-corner ${c} ${w.corner === c ? 'on' : ''}" data-ws="win" data-k="corner" data-v="${c}" title="${c.replace('-', ' ')}"></button>`;
+  const kindRows = {
+    now: [sw('bar', 'Progress bar'), sw('until', 'End time', '“until 4:03 PM”'), sw('next', 'Up next')],
+    today: [sw('checks', 'Tick boxes', 'Complete tasks right on the widget'), sw('prio', 'Priority colours'), sw('times', 'Times'), sw('projects', 'Project names'), sw('overdue', 'Late tasks'),
+      row('Order', seg('style', 'sort', [['smart', 'Smart'], ['priority', 'Priority'], ['due', 'Time'], ['name', 'A–Z']], st.sort))],
+    focus: [sw('bar', 'Progress bar'), sw('task', 'Linked task')],
+    deadlines: [sw('checks', 'Tick boxes'), row('Coming up', seg('style', 'range', [[7, '7 days'], [14, '14'], [30, '30'], ['all', 'All']], st.range)),
+      row('Show as', seg('style', 'dlStyle', [['countdown', 'Countdown'], ['date', 'Date']], st.dlStyle))],
+  };
+  return `
+    <section class="ws-sec">
+      <h4>Widget</h4>
+      <label class="ws-switch-row ws-main"><span class="ws-rl"><span>${w.on ? 'Showing on your desktop' : 'Hidden'}</span><small>${w.on ? 'Drag it to move it, drag its corner to resize it, right-click it for its menu.' : 'Turn it on to put it on your desktop.'}</small></span>
+        <input type="checkbox" class="ws-switch" data-ws-on ${w.on ? 'checked' : ''}></label>
+      ${row('Shows', seg('win', 'kind', s.kinds.map(([k, label]) => [k, `${ic(WIDGET_LABELS[k][0])}${esc(label)}`]), w.kind, 'ws-kinds'))}
+      ${row('Title', `<input class="ws-input" data-ws-text="title" maxlength="40" placeholder="${esc(WIDGET_LABELS[w.kind][1])}" value="${esc(st.title)}">`)}
+      ${row('Layer', seg('win', 'layer', s.layers, w.layer), LAYER_HINTS[w.layer] || '')}
+      ${row('Position', `<div class="ws-screen">${['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(corner).join('')}<span>${w.corner ? '' : 'Dragged'}</span></div>`,
+        w.corner ? 'Or drag it anywhere.' : 'Placed where you dragged it. Pick a corner to snap it back.')}
+      ${row('Size', `<div class="ws-sizes">${seg('size', 'size', WIDGET_SIZE_STEPS.map(([label, f]) => [f, label]), WIDGET_SIZE_STEPS.find(([, f]) => sizeOn(f))?.[1] ?? '')}
+        <span class="ws-wh"><input type="number" min="160" max="900" data-ws-dim="width" value="${w.size.width}">×<input type="number" min="72" max="800" data-ws-dim="height" value="${w.size.height}"></span></div>`)}
+      ${s.mac && w.layer === 'desktop' && w.on && !s.legacy ? `<button class="ws-btn" data-ws-move>${ic('swap')} Move or resize on the desktop…</button>` : ''}
+    </section>
+    <section class="ws-sec">
+      <h4>Style</h4>
+      <div class="ws-presets">${WIDGET_PRESETS.map(([id, name, p]) => {
+        const look = { ...WIDGET_STYLE, ...p };
+        return `<button class="ws-preset ${st.preset === id ? 'on' : ''}" data-ws-preset="${id}" data-theme-hint="${look.theme}" data-bg="${look.bg}" style="--pa:${look.accent || 'var(--accent)'}">
+          <span class="ws-pv" data-font="${look.font}" style="border-radius:${Math.min(12, look.radius / 2)}px"><b>Aa</b><i></i><i></i></span>${name}</button>`;
+      }).join('')}</div>
+    </section>
+    <section class="ws-sec">
+      <h4>Look</h4>
+      ${row('Theme', seg('style', 'theme', [['auto', 'Match Capri'], ['light', 'Light'], ['dark', 'Dark'], ['capri', 'Capri']], st.theme))}
+      ${row('Background', seg('style', 'bg', [['glass', 'Glass'], ['solid', 'Solid'], ['tint', 'Tint'], ['gradient', 'Gradient'], ['clear', 'Clear']], st.bg))}
+      ${st.bg === 'clear' ? '' : slider('opacity', 'Opacity', 20, 100, 1, '%')}
+      ${st.bg === 'glass' ? slider('blur', 'Blur', 0, 40, 1, 'px') : ''}
+      ${slider('radius', 'Corners', 0, 32, 1, 'px')}
+      ${row('Border', seg('style', 'border', [['none', 'None'], ['subtle', 'Subtle'], ['accent', 'Colour']], st.border))}
+      ${sw('shadow', 'Shadow')}
+      ${row('Colour', `<div class="ws-swatches"><button class="ws-swatch theme ${st.accent ? '' : 'on'}" data-ws="style" data-k="accent" data-v="" title="Match the theme"></button>${
+        WIDGET_ACCENTS.map((c) => `<button class="ws-swatch ${st.accent === c ? 'on' : ''}" data-ws="style" data-k="accent" data-v="${c}" style="--sw:${c}" title="${c}"></button>`).join('')}
+        <label class="ws-swatch custom ${st.accent && !WIDGET_ACCENTS.includes(st.accent) ? 'on' : ''}" title="Pick any colour" style="--sw:${st.accent && !WIDGET_ACCENTS.includes(st.accent) ? st.accent : 'transparent'}"><input type="color" data-ws-color value="${st.accent || '#a87414'}"></label></div>`,
+        'Used for the title, bars, tick boxes, tint and border.')}
+    </section>
+    <section class="ws-sec">
+      <h4>Text</h4>
+      ${row('Font', seg('style', 'font', [['system', '<span data-font="system">System</span>'], ['rounded', '<span data-font="rounded">Rounded</span>'], ['serif', '<span data-font="serif">Serif</span>'], ['mono', '<span data-font="mono">Mono</span>']], st.font))}
+      ${row('Size', seg('style', 'text', [[0.85, 'S'], [1, 'M'], [1.15, 'L'], [1.3, 'XL'], [1.5, 'XXL']], st.text))}
+      ${row('Spacing', seg('style', 'density', [['compact', 'Compact'], ['cozy', 'Cozy'], ['roomy', 'Roomy']], st.density))}
+      ${w.kind === 'now' || w.kind === 'focus' ? row('Align', seg('style', 'align', [['left', 'Left'], ['center', 'Centre']], st.align)) : ''}
+      ${sw('boldTitle', 'Bold titles')}${sw('accentTitle', 'Coloured titles')}
+    </section>
+    <section class="ws-sec">
+      <h4>Show</h4>
+      ${sw('header', 'Title bar')}${st.header ? sw('clock', 'Time in the title bar') + sw('open', 'Open Capri button') + (w.kind === 'today' || w.kind === 'deadlines' ? sw('count', 'Count') : '') : ''}
+      ${kindRows[w.kind].join('')}
+    </section>
+    <section class="ws-sec ws-foot">
+      <button class="ws-btn" data-ws-reset>${ic('undo')} Reset look</button>
+      ${s.widgets.length > 1 ? `<button class="ws-btn" data-ws-copy>${ic('copy')} Use this look on every widget</button>` : ''}
+      ${s.legacy ? '' : `<button class="ws-btn danger" data-ws-remove>${ic('trash')} Remove widget</button>`}
+    </section>
+    ${s.legacy ? `<p class="ws-legacy">${ic('sparkle')} Update the Capri app (tray → Check for updates) for more widgets, the Always on top layer, and widgets that float above Capri while you edit them.</p>` : ''}`;
 }
 
-function setWidgetStyle(changes) {
-  store.set('widgetStyle', { ...store.get('widgetStyle', {}), ...changes });
-  refreshWidgetMenu();
+// The live preview: the same card the widget draws, at the widget's real size, over a wallpaper.
+function studioPreview() {
+  const stage = $('.ws-stage', $('#wstudio'));
+  const w = studioWidget();
+  if (!stage) return;
+  stage.dataset.wall = studio.wall;
+  if (!w) { stage.innerHTML = ''; return; }
+  if (!$('.ws-frame', stage)) stage.innerHTML = '<div class="ws-frame" aria-hidden="true"><div class="wcard"></div></div><span class="ws-size"></span>';
+  const frame = $('.ws-frame', stage);
+  const { width, height } = w.size;
+  const scale = Math.min(1, (stage.clientWidth - 32) / width, (stage.clientHeight - 44) / height);
+  Object.assign(frame.style, { width: `${width}px`, height: `${height}px`, transform: `translate(-50%, -50%) scale(${scale})` });
+  paintWidget($('.wcard', frame), { kind: w.kind, id: w.id, st: widgetStyle(w.id), width, height, move: false, live: false });
+  $('.ws-size', stage).textContent = `${width} × ${height}${scale < 1 ? ` · shown at ${Math.round(scale * 100)}%` : ''}`;
 }
 
-async function openWidgetMenu() {
-  closeDropdown();
+function renderStudio() {
+  const root = $('#wstudio');
+  if (!root || !studio.state) return;
+  if (!studioWidget()) studio.id = studio.state.widgets[0]?.id || null;
+  $('.ws-tabs', root).innerHTML = studioTabsHtml();
+  const right = $('.ws-right', root);
+  const scroll = right.scrollTop;
+  right.innerHTML = studioSettingsHtml();
+  right.scrollTop = scroll;
+  $('.ws-walls', root).innerHTML = WIDGET_WALLS.map(([id, name]) => `<button class="ws-wall ${studio.wall === id ? 'on' : ''}" data-ws-wall="${id}" data-wall="${id}" title="${name}"></button>`).join('');
+  const peek = $('[data-ws-peek]', root);
+  peek.closest('label').hidden = !!studio.state.legacy;
+  peek.checked = studio.peek;
+  $('#widget-btn')?.classList.toggle('on', studio.state.widgets.some((w) => w.on));
+  studioPreview();
+}
+
+async function studioUpdate(changes) {
+  try { studio.state = await deskWidgets.update(studio.id, changes); } catch (err) { return toast(err.message); }
+  renderStudio();
+}
+function studioStyle(changes, { look = true } = {}) {
+  if (!studio.id) return;
+  // Changing any part of the look by hand leaves the ready-made style.
+  saveWidgetStyle(studio.id, look && Object.keys(changes).some((k) => LOOK_KEYS.includes(k)) ? { ...changes, preset: '' } : changes);
+  renderStudio();
+}
+const setPeek = (on) => { if (deskWidgets.multi) window.capriDesktop.peekWidgets(on).catch(() => {}); };
+
+async function openWidgetStudio(id = null) {
+  if (!desktopWidget()) return;
   closeTaskMenu();
-  try { widgetState = await window.capriDesktop.widgetSettings(); } catch (err) { return toast(err.message); }
-  const menu = document.createElement('div');
-  menu.className = 'dd-menu ctx-menu remind-menu widget-menu';
-  menu.setAttribute('role', 'menu');
-  menu.innerHTML = widgetMenuHtml();
-  menu.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const b = (sel) => e.target.closest(sel);
-    if (b('[data-w-on]')) return setWidgetSettings({ on: Boolean(b('[data-w-on]').dataset.wOn) });
-    if (b('[data-w-kind]')) return setWidgetSettings({ kind: b('[data-w-kind]').dataset.wKind });
-    if (b('[data-w-corner]')) return setWidgetSettings({ corner: b('[data-w-corner]').dataset.wCorner });
-    if (b('[data-w-size]')) {
-      const f = Number(b('[data-w-size]').dataset.wSize);
-      const d = widgetState.defaultSize;
-      return setWidgetSettings({ size: f === 1 ? 'reset' : { width: Math.round(d.width * f), height: Math.round(d.height * f) } });
-    }
-    if (b('[data-w-clickable]')) return setWidgetSettings({ clickable: !widgetState.clickable });
-    if (b('[data-w-move]')) { closeTaskMenu(); return setWidgetSettings({ move: true }); }
-    if (b('[data-w-bg]')) return setWidgetStyle({ bg: b('[data-w-bg]').dataset.wBg });
-    if (b('[data-w-accent]')) return setWidgetStyle({ accent: b('[data-w-accent]').dataset.wAccent });
-    if (b('[data-w-text]')) return setWidgetStyle({ text: Number(b('[data-w-text]').dataset.wText) });
-    if (b('[data-w-flag]')) { const k = b('[data-w-flag]').dataset.wFlag; return setWidgetStyle({ [k]: !widgetStyle()[k] }); }
-  });
-  menu.addEventListener('input', (e) => {
-    if (!e.target.matches('[data-w-opacity]')) return;
-    store.set('widgetStyle', { ...store.get('widgetStyle', {}), opacity: Number(e.target.value) });
-    e.target.nextElementSibling.textContent = `${e.target.value}%`; // re-rendering would drop the slider mid-drag
-  });
-  const r = $('#widget-btn').getBoundingClientRect();
-  showMenu(menu, r.left, r.bottom + 6);
-  // It's tall: keep it under its button and let it scroll, so the button can still close it.
-  menu.style.top = `${r.bottom + 6}px`;
-  menu.style.maxHeight = `${innerHeight - r.bottom - 14}px`;
-  menu.style.transformOrigin = 'left top';
+  try { studio.state = await deskWidgets.state(); } catch (err) { return toast(err.message); }
+  studio.id = id && studio.state.widgets.some((w) => w.id === id) ? id : studio.id && studio.state.widgets.some((w) => w.id === studio.id) ? studio.id : studio.state.widgets[0]?.id || null;
+  if (!$('#wstudio')) {
+    const root = document.createElement('div');
+    root.id = 'wstudio';
+    root.className = 'modal wstudio';
+    root.innerHTML = `<div class="modal-card ws-card" role="dialog" aria-label="Desktop widgets">
+      <header class="ws-head"><span class="ws-logo">${ic('widget')}</span><div><h3>Desktop widgets</h3><p>Everything here changes your widgets as you pick.</p></div>
+        <button class="icon-btn" data-ws-close title="Close (Esc)">${ic('close')}</button></header>
+      <nav class="ws-tabs"></nav>
+      <div class="ws-body">
+        <div class="ws-left">
+          <div class="ws-stage"></div>
+          <div class="ws-under"><span>Preview on</span><span class="ws-walls"></span></div>
+          <label class="ws-switch-row ws-peek"><span class="ws-rl"><span>Float widgets on top while editing</span><small>So you can watch the real ones change.</small></span><input type="checkbox" class="ws-switch" data-ws-peek></label>
+        </div>
+        <div class="ws-right"></div>
+      </div></div>`;
+    document.body.append(root);
+    root.addEventListener('click', studioClick);
+    root.addEventListener('input', studioInput);
+    root.addEventListener('change', studioChange);
+    root.addEventListener('pointerdown', (e) => { if (e.target === root) closeWidgetStudio(); });
+  }
+  studio.open = true;
+  renderStudio();
+  if (studio.peek) setPeek(true);
+}
+
+function closeWidgetStudio() {
+  $('#wstudio')?.remove();
+  if (studio.open && studio.peek) setPeek(false);
+  studio.open = false;
+  studio.add = false;
+}
+
+function studioClick(e) {
+  const t = (sel) => e.target.closest(sel);
+  if (t('[data-ws-close]')) return closeWidgetStudio();
+  if (t('[data-ws-tab]')) { studio.id = t('[data-ws-tab]').dataset.wsTab; studio.add = false; return renderStudio(); }
+  if (t('[data-ws-add]')) { studio.add = !studio.add; return renderStudio(); }
+  if (t('[data-ws-addkind]')) {
+    const before = new Set(studio.state.widgets.map((w) => w.id));
+    studio.add = false;
+    return window.capriDesktop.addWidget(t('[data-ws-addkind]').dataset.wsAddkind).then((s) => {
+      studio.state = s;
+      studio.id = s.widgets.find((w) => !before.has(w.id))?.id || studio.id;
+      renderStudio();
+    }).catch((err) => toast(err.message));
+  }
+  if (t('[data-ws-wall]')) { studio.wall = t('[data-ws-wall]').dataset.wsWall; store.set('widgetWall', studio.wall); return renderStudio(); }
+  if (t('[data-ws-preset]')) {
+    const [id, , p] = WIDGET_PRESETS.find(([pid]) => pid === t('[data-ws-preset]').dataset.wsPreset);
+    const look = Object.fromEntries(LOOK_KEYS.map((k) => [k, WIDGET_STYLE[k]]));
+    return studioStyle({ ...look, ...p, preset: id }, { look: false });
+  }
+  if (t('[data-ws-move]')) { closeWidgetStudio(); return studioUpdate({ move: true }); }
+  if (t('[data-ws-reset]')) {
+    const look = Object.fromEntries(LOOK_KEYS.map((k) => [k, WIDGET_STYLE[k]]));
+    return studioStyle({ ...look, preset: 'capri' }, { look: false });
+  }
+  if (t('[data-ws-copy]')) {
+    const st = widgetStyle(studio.id);
+    const look = Object.fromEntries([...LOOK_KEYS, 'preset'].map((k) => [k, st[k]]));
+    studio.state.widgets.forEach((w) => saveWidgetStyle(w.id, look));
+    toast('Look copied to every widget');
+    return renderStudio();
+  }
+  if (t('[data-ws-remove]')) {
+    const w = studioWidget();
+    return askConfirm(`Remove the ${widgetName(w)} widget?`, { ok: 'Remove', danger: true }).then(async (yes) => {
+      if (!yes) return;
+      studio.state = await window.capriDesktop.removeWidget(w.id);
+      try { localStorage.removeItem(`tdp:${styleKey(w.id)}`); } catch { /* ignore */ }
+      studio.id = null;
+      renderStudio();
+    });
+  }
+  const b = t('[data-ws]');
+  if (!b) return;
+  const { ws, k, v } = b.dataset;
+  const val = v !== '' && !Number.isNaN(Number(v)) && k !== 'accent' ? Number(v) : v;
+  if (ws === 'style') return studioStyle({ [k]: val });
+  if (ws === 'win') return studioUpdate({ [k]: v });
+  if (ws === 'size') {
+    const w = studioWidget();
+    return studioUpdate({ size: val === 1 ? 'reset' : { width: Math.round(w.defaultSize.width * val), height: Math.round(w.defaultSize.height * val) } });
+  }
+}
+
+function studioInput(e) {
+  const el = e.target;
+  if (el.matches('[data-ws-range]')) {
+    // Saved as it moves; the slider isn't redrawn under the pointer.
+    const k = el.dataset.wsRange;
+    saveWidgetStyle(studio.id, { [k]: Number(el.value), preset: '' });
+    el.nextElementSibling.textContent = `${el.value}${k === 'opacity' ? '%' : 'px'}`;
+    $$('.ws-preset.on', $('#wstudio')).forEach((p) => p.classList.remove('on'));
+  }
+  if (el.matches('[data-ws-text]')) saveWidgetStyle(studio.id, { [el.dataset.wsText]: el.value.trim() });
+  if (el.matches('[data-ws-color]')) saveWidgetStyle(studio.id, { accent: el.value, preset: '' });
+  studioPreview();
+}
+
+function studioChange(e) {
+  const el = e.target;
+  if (el.matches('[data-ws-on]')) return studioUpdate({ on: el.checked });
+  if (el.matches('[data-ws-peek]')) { studio.peek = el.checked; store.set('widgetPeek', el.checked); return setPeek(el.checked); }
+  if (el.matches('[data-ws-flag]')) return studioStyle({ [el.dataset.wsFlag]: el.checked });
+  if (el.matches('[data-ws-text]') || el.matches('[data-ws-color]')) return renderStudio();
+  if (el.matches('[data-ws-dim]')) {
+    const w = studioWidget();
+    return studioUpdate({ size: { ...w.size, [el.dataset.wsDim]: Number(el.value) || w.size[el.dataset.wsDim] } });
+  }
 }
 
 function setupWidgetButton() {
@@ -2524,13 +2770,22 @@ function setupWidgetButton() {
   const btn = document.createElement('button');
   btn.className = 'icon-btn remind-btn widget-btn';
   btn.id = 'widget-btn';
-  btn.title = 'Desktop widget';
+  btn.title = 'Desktop widgets';
   btn.innerHTML = ic('widget');
   $('#remind-btn').before(btn);
-  btn.addEventListener('click', (e) => { e.stopPropagation(); if (ctxMenu?.classList.contains('widget-menu')) closeTaskMenu(); else openWidgetMenu(); });
-  window.capriDesktop.widgetSettings().then((s) => { widgetState = s; btn.classList.toggle('on', s.on); }).catch(() => {});
-  // Changed from the tray, the widget's own menu, or by dragging it.
-  window.capriDesktop.onWidgetChanged?.((s) => { widgetState = s; btn.classList.toggle('on', s.on); refreshWidgetMenu(); });
+  btn.addEventListener('click', (e) => { e.stopPropagation(); if (studio.open) closeWidgetStudio(); else openWidgetStudio(); });
+  deskWidgets.state().then((s) => btn.classList.toggle('on', s.widgets.some((w) => w.on))).catch(() => {});
+  // Changed from the tray, a widget's own menu, or by dragging one.
+  window.capriDesktop.onWidgetChanged?.((s) => {
+    s = deskWidgets.wrap(s);
+    btn.classList.toggle('on', s.widgets.some((w) => w.on));
+    if (studio.open) { studio.state = s; renderStudio(); }
+  });
+  window.capriDesktop.onOpenWidgetStudio?.((id) => openWidgetStudio(id));
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && studio.open && !e.defaultPrevented) closeWidgetStudio(); });
+  addEventListener('resize', () => { if (studio.open) studioPreview(); });
+  setInterval(() => { if (studio.open) studioPreview(); }, 1000); // the focus timer and clocks tick in the preview too
+  document.addEventListener('visibilitychange', () => { if (studio.open && studio.peek && !document.hidden) setPeek(true); });
 }
 
 function updateNowStrip() {

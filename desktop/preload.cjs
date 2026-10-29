@@ -8,8 +8,12 @@ contextBridge.exposeInMainWorld('capriDesktop', {
   widgetDone: () => ipcRenderer.send('capri:widget-done'),
   widgetMenu: () => ipcRenderer.send('capri:widget-menu'),
   widgetResize: (size) => ipcRenderer.send('capri:widget-resize', size),
-  // The sidebar's widget panel
+  // Capri's widget settings
   widgetSettings: () => ipcRenderer.invoke('capri:widget-get'),
-  setWidgetSettings: (changes) => ipcRenderer.invoke('capri:widget-set', changes),
+  updateWidget: (id, changes) => ipcRenderer.invoke('capri:widget-update', id, changes),
+  addWidget: (kind) => ipcRenderer.invoke('capri:widget-add', kind),
+  removeWidget: (id) => ipcRenderer.invoke('capri:widget-remove', id),
+  peekWidgets: (on) => ipcRenderer.invoke('capri:widget-peek', on),
   onWidgetChanged: (cb) => ipcRenderer.on('capri:widget-changed', (e, state) => cb(state)),
+  onOpenWidgetStudio: (cb) => ipcRenderer.on('capri:open-widget-studio', (e, id) => cb(id)),
 });
