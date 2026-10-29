@@ -35,6 +35,7 @@ const ICONS = {
   subtask: '<path d="M6 3v11a3 3 0 0 0 3 3h10"/><path d="M15.5 13.5L19 17l-3.5 3.5"/>',
   inbox: '<path d="M3 13l2.6-8.2A2.5 2.5 0 0 1 8 3h8a2.5 2.5 0 0 1 2.4 1.8L21 13v5a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z"/><path d="M3 13h5l1.5 3h5l1.5-3h5"/>',
   board: '<rect x="3" y="3.5" width="5" height="17" rx="1.8"/><rect x="9.5" y="3.5" width="5" height="11" rx="1.8"/><rect x="16" y="3.5" width="5" height="14" rx="1.8"/>',
+  widget: '<rect x="3" y="4" width="18" height="16" rx="3.5"/><path d="M7 9.5h6M7 13.5h10"/>',
   grid: '<rect x="3" y="3" width="7.5" height="7.5" rx="2.2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2.2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2.2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2.2"/>',
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   done: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/>',
@@ -954,7 +955,7 @@ document.addEventListener('contextmenu', (e) => {
 });
 document.addEventListener('pointerdown', (e) => {
   if (!ctxMenu || ctxMenu.contains(e.target)) return;
-  if (ctxMenu.classList.contains('remind-menu') && e.target.closest('#remind-btn')) return; // the bell toggles its own menu
+  if (ctxMenu.classList.contains('remind-menu') && e.target.closest('#remind-btn, #widget-btn')) return; // the bell and widget buttons toggle their own menus
   closeTaskMenu();
 }, true);
 document.addEventListener('keydown', (e) => {
@@ -2265,10 +2266,21 @@ function nowParts() {
   return null;
 }
 
+// How the widget looks, set from the sidebar's widget panel. Kept in this browser's storage, which the
+// widget window shares with the app, so it changes as soon as you pick something.
+const WIDGET_STYLE = { bg: 'glass', opacity: 82, accent: '', text: 1, header: true, open: true, bar: true, checks: true, overdue: true };
+const widgetStyle = () => ({ ...WIDGET_STYLE, ...store.get('widgetStyle', {}) });
+const WIDGET_ACCENTS = ['#e8505b', '#f29d38', '#e2b53a', '#4fb36a', '#2fb5a6', '#3f9be0', '#6a6ff0', '#b462d8', '#ec6fa9'];
+
 const wDone = new Map(); // task id → timer: ticked off on the widget, still shown a moment so it can be unticked
-// As many 29px rows as the widget's height has room for, under its header (and a "+N more" line).
-const widgetRows = (more = false) => Math.max(1, Math.floor((innerHeight - 57 - (more ? 20 : 0)) / 29));
-const wCheck = (x, prio = '') => `<button class="w-check ${prio} ${wDone.has(x.id) ? 'on' : ''}" data-widget-check="${x.id}" title="${wDone.has(x.id) ? 'Undo' : 'Complete'}">${ic('check')}</button>`;
+// As many 29px rows as the widget's height has room for, under its header (and a "+N more" line), at its text size.
+function widgetRows(more = false) {
+  const st = widgetStyle();
+  const z = st.text;
+  const head = st.header || WIDGET_MOVE ? 21 * z : 0;
+  return Math.max(1, Math.floor((innerHeight - 36 - head - (more ? 20 * z : 0)) / (29 * z)));
+}
+const wCheck = (x, prio = '') => !widgetStyle().checks ? '' : `<button class="w-check ${prio} ${wDone.has(x.id) ? 'on' : ''}" data-widget-check="${x.id}" title="${wDone.has(x.id) ? 'Undo' : 'Complete'}">${ic('check')}</button>`;
 const wRowClass = (x) => `w-row${wDone.has(x.id) ? ' done' : ''}`;
 
 const WIDGET_LABELS = { now: ['clock', 'Right now'], today: ['sun', 'Today'], focus: ['timer', 'Focus'], deadlines: ['flag', 'Deadlines'] };
@@ -2276,7 +2288,8 @@ const WIDGET_LABELS = { now: ['clock', 'Right now'], today: ['sun', 'Today'], fo
 function widgetBody() {
   if (WIDGET === 'today') {
     const t = today();
-    const list = sortTasks(openTasks().filter((x) => dueDay(x) && dueDay(x) <= t && !x.parent_id), 'smart');
+    const late = widgetStyle().overdue;
+    const list = sortTasks(openTasks().filter((x) => dueDay(x) && (late ? dueDay(x) <= t : dueDay(x) === t) && !x.parent_id), 'smart');
     if (!list.length) return { body: `<div class="w-title">All clear</div><div class="w-left">Nothing due today.</div>` };
     const shown = list.slice(0, list.length > widgetRows() ? widgetRows(true) : list.length);
     return {
@@ -2321,14 +2334,21 @@ function renderWidget({ signedOut = false } = {}) {
   if (!el) { el = document.createElement('div'); el.id = 'widget'; document.body.append(el); }
   const w = signedOut ? { body: '<div class="w-title">Open Capri to sign in</div>' } : widgetBody();
   const [icon, label] = WIDGET_LABELS[WIDGET];
-  const open = window.capriDesktop?.openApp && !WIDGET_MOVE ? `<button class="w-open" data-widget-open title="Open Capri">${ic('external')}</button>` : '';
+  const st = widgetStyle();
+  const open = window.capriDesktop?.openApp && !WIDGET_MOVE && st.open ? `<button class="w-open" data-widget-open title="Open Capri">${ic('external')}</button>` : '';
   const done = WIDGET_MOVE ? '<button class="w-done" data-widget-done>Done</button>' : '';
-  el.className = `wcard w-${WIDGET} ${w.on ? 'now' : ''} ${WIDGET_MOVE ? 'moving' : ''}`;
+  el.className = `wcard w-${WIDGET} ${w.on ? 'now' : ''} ${WIDGET_MOVE ? 'moving' : ''} ${st.bar ? '' : 'no-bar'}`;
+  el.dataset.bg = st.bg;
+  el.style.setProperty('--wbg', `${st.opacity}%`);
+  if (st.accent) { el.style.setProperty('--accent', st.accent); el.style.setProperty('--accent-2', `color-mix(in srgb, ${st.accent} 60%, #fff)`); }
+  else { el.style.removeProperty('--accent'); el.style.removeProperty('--accent-2'); }
   // The clock and Right now cards grow with the widget; the lists show more rows instead.
   const grow = WIDGET === 'now' || WIDGET === 'focus' ? Math.min(innerWidth / 300, innerHeight / 132) : 1;
-  el.style.setProperty('--wz', Math.min(3, Math.max(0.8, grow)).toFixed(3));
+  el.style.setProperty('--wz', Math.min(3, Math.max(0.8, grow * st.text)).toFixed(3));
   const title = WIDGET_MOVE ? 'Drag to place' : esc(w.label || label);
-  el.innerHTML = `<div class="w-top"><span class="w-label">${ic(icon)} ${title}${w.count && !WIDGET_MOVE ? ` <span class="w-count">${w.count}</span>` : ''}</span>${open}${done}</div>${w.body}`;
+  const top = st.header || WIDGET_MOVE
+    ? `<div class="w-top"><span class="w-label">${ic(icon)} ${title}${w.count && !WIDGET_MOVE ? ` <span class="w-count">${w.count}</span>` : ''}</span>${open}${done}</div>` : '';
+  el.innerHTML = top + w.body;
 }
 
 async function bootWidget() {
@@ -2351,6 +2371,7 @@ async function bootWidget() {
   setInterval(load, 2 * 60000); // changes made elsewhere
   addEventListener('storage', (e) => { if (e.key === 'tdp:timer') renderWidget(); }); // the app started, paused or reset the timer
   addEventListener('storage', (e) => { if (e.key === 'tdp:changed') load(); }); // the app synced something new
+  addEventListener('storage', (e) => { if (e.key === 'tdp:widgetStyle') renderWidget(); }); // changed in the sidebar's widget panel
   document.addEventListener('click', (e) => {
     if (e.target.closest('[data-widget-open]')) window.capriDesktop?.openApp?.();
     if (e.target.closest('[data-widget-done]')) window.capriDesktop?.widgetDone?.();
@@ -2398,6 +2419,118 @@ function widgetGrip() {
   const end = () => { start = null; };
   grip.addEventListener('pointerup', end);
   grip.addEventListener('pointercancel', end);
+}
+
+// ---------- the sidebar's widget panel (desktop app) ----------
+// In the Windows and Mac app, a button by the bell opens the desktop widget's settings: on or off, what
+// it shows, where it sits, its size, and how it looks.
+const desktopWidget = () => typeof window.capriDesktop?.widgetSettings === 'function';
+const WIDGET_SIZE_STEPS = [['Small', 0.8], ['Default', 1], ['Large', 1.3], ['Huge', 1.6]];
+const WIDGET_TEXT_STEPS = [['Small', 0.9], ['Normal', 1], ['Large', 1.15], ['Larger', 1.3]];
+let widgetState = null;
+
+function widgetMenuHtml() {
+  const ws = widgetState;
+  const st = widgetStyle();
+  const chip = (attr, value, label, on) => `<button class="ctx-p ${on ? 'on' : ''}" ${attr}="${esc(String(value))}">${esc(label)}</button>`;
+  const flag = (k, label) => `<button class="dd-opt remind-opt ${st[k] ? 'on' : ''}" data-w-flag="${k}">${ic('check')}<span class="dd-text">${label}</span></button>`;
+  const sizeOn = (f) => (ws.customSize ? Math.round(ws.defaultSize.width * f) === ws.size.width && Math.round(ws.defaultSize.height * f) === ws.size.height : f === 1);
+  const corners = [['top-left', 'Top left'], ['top-right', 'Top right'], ['bottom-left', 'Bottom left'], ['bottom-right', 'Bottom right']];
+  return `<div class="ctx-note remind-status ${ws.on ? 'on' : ''}">${ic('widget')}<span><b>Desktop widget ${ws.on ? 'on' : 'off'}</b><br>${
+      ws.on ? 'On your desktop, behind your windows. Drag it to move it, drag its corner to resize it.' : 'A small card on your desktop: what’s on now, today’s tasks, the focus timer or deadlines.'}</span></div>
+    <button class="dd-opt ${ws.on ? '' : 'strong'}" data-w-on="${ws.on ? '' : '1'}">${ic('widget')}<span class="dd-text">${ws.on ? 'Turn off the widget' : 'Turn on the widget'}</span></button>
+    <div class="ctx-sep"></div>
+    <div class="remind-label">Shows</div>
+    <div class="ctx-prio remind-lead w-grid">${ws.kinds.map(([id, label]) => chip('data-w-kind', id, label, ws.kind === id)).join('')}</div>
+    <div class="remind-label">Position${ws.corner ? '' : ' <span class="w-sub">· where you dragged it</span>'}</div>
+    <div class="ctx-prio remind-lead w-grid">${corners.map(([id, label]) => chip('data-w-corner', id, label, ws.corner === id)).join('')}</div>
+    <div class="remind-label">Size${ws.customSize && !WIDGET_SIZE_STEPS.some(([, f]) => sizeOn(f)) ? ` <span class="w-sub">· ${ws.size.width} × ${ws.size.height}</span>` : ''}</div>
+    <div class="ctx-prio remind-lead">${WIDGET_SIZE_STEPS.map(([label, f]) => chip('data-w-size', f, label, sizeOn(f))).join('')}</div>
+    <div class="ctx-sep"></div>
+    <div class="remind-label">Background</div>
+    <div class="ctx-prio remind-lead">${[['glass', 'Glass'], ['solid', 'Solid'], ['clear', 'Clear']].map(([id, label]) => chip('data-w-bg', id, label, st.bg === id)).join('')}</div>
+    ${st.bg === 'clear' ? '' : `<label class="w-range"><span>Opacity</span><input type="range" min="30" max="100" step="1" value="${st.opacity}" data-w-opacity><b>${st.opacity}%</b></label>`}
+    <div class="remind-label">Colour</div>
+    <div class="w-swatches"><button class="w-swatch theme ${st.accent ? '' : 'on'}" data-w-accent="" title="Match the theme"></button>${
+      WIDGET_ACCENTS.map((c) => `<button class="w-swatch ${st.accent === c ? 'on' : ''}" data-w-accent="${c}" style="--sw:${c}" title="${c}"></button>`).join('')}</div>
+    <div class="remind-label">Text size</div>
+    <div class="ctx-prio remind-lead">${WIDGET_TEXT_STEPS.map(([label, f]) => chip('data-w-text', f, label, st.text === f)).join('')}</div>
+    <div class="remind-label">Show</div>
+    ${flag('header', 'Title bar')}${flag('open', 'Open Capri button')}${flag('bar', 'Progress bars')}${flag('checks', 'Tick boxes on tasks')}${flag('overdue', 'Late tasks in Today')}
+    ${ws.mac ? `<div class="ctx-sep"></div>
+      <button class="dd-opt remind-opt ${ws.clickable ? 'on' : ''}" data-w-clickable>${ic('check')}<span class="dd-text">Can be clicked <span class="w-sub">(off: sits behind your desktop icons)</span></span></button>
+      ${!ws.clickable && ws.on ? `<button class="dd-opt" data-w-move>${ic('swap')}<span class="dd-text">Move or resize widget…</span></button>` : ''}` : ''}`;
+}
+
+function refreshWidgetMenu() {
+  if (!ctxMenu?.classList.contains('widget-menu')) return;
+  const scroll = ctxMenu.scrollTop;
+  ctxMenu.innerHTML = widgetMenuHtml();
+  ctxMenu.scrollTop = scroll;
+}
+
+async function setWidgetSettings(changes) {
+  try { widgetState = await window.capriDesktop.setWidgetSettings(changes); } catch (err) { return toast(err.message); }
+  $('#widget-btn')?.classList.toggle('on', widgetState.on);
+  refreshWidgetMenu();
+}
+
+function setWidgetStyle(changes) {
+  store.set('widgetStyle', { ...store.get('widgetStyle', {}), ...changes });
+  refreshWidgetMenu();
+}
+
+async function openWidgetMenu() {
+  closeDropdown();
+  closeTaskMenu();
+  try { widgetState = await window.capriDesktop.widgetSettings(); } catch (err) { return toast(err.message); }
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu ctx-menu remind-menu widget-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = widgetMenuHtml();
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const b = (sel) => e.target.closest(sel);
+    if (b('[data-w-on]')) return setWidgetSettings({ on: Boolean(b('[data-w-on]').dataset.wOn) });
+    if (b('[data-w-kind]')) return setWidgetSettings({ kind: b('[data-w-kind]').dataset.wKind });
+    if (b('[data-w-corner]')) return setWidgetSettings({ corner: b('[data-w-corner]').dataset.wCorner });
+    if (b('[data-w-size]')) {
+      const f = Number(b('[data-w-size]').dataset.wSize);
+      const d = widgetState.defaultSize;
+      return setWidgetSettings({ size: f === 1 ? 'reset' : { width: Math.round(d.width * f), height: Math.round(d.height * f) } });
+    }
+    if (b('[data-w-clickable]')) return setWidgetSettings({ clickable: !widgetState.clickable });
+    if (b('[data-w-move]')) { closeTaskMenu(); return setWidgetSettings({ move: true }); }
+    if (b('[data-w-bg]')) return setWidgetStyle({ bg: b('[data-w-bg]').dataset.wBg });
+    if (b('[data-w-accent]')) return setWidgetStyle({ accent: b('[data-w-accent]').dataset.wAccent });
+    if (b('[data-w-text]')) return setWidgetStyle({ text: Number(b('[data-w-text]').dataset.wText) });
+    if (b('[data-w-flag]')) { const k = b('[data-w-flag]').dataset.wFlag; return setWidgetStyle({ [k]: !widgetStyle()[k] }); }
+  });
+  menu.addEventListener('input', (e) => {
+    if (!e.target.matches('[data-w-opacity]')) return;
+    store.set('widgetStyle', { ...store.get('widgetStyle', {}), opacity: Number(e.target.value) });
+    e.target.nextElementSibling.textContent = `${e.target.value}%`; // re-rendering would drop the slider mid-drag
+  });
+  const r = $('#widget-btn').getBoundingClientRect();
+  showMenu(menu, r.left, r.bottom + 6);
+  // It's tall: keep it under its button and let it scroll, so the button can still close it.
+  menu.style.top = `${r.bottom + 6}px`;
+  menu.style.maxHeight = `${innerHeight - r.bottom - 14}px`;
+  menu.style.transformOrigin = 'left top';
+}
+
+function setupWidgetButton() {
+  if (!desktopWidget() || WIDGET || $('#widget-btn')) return;
+  const btn = document.createElement('button');
+  btn.className = 'icon-btn remind-btn widget-btn';
+  btn.id = 'widget-btn';
+  btn.title = 'Desktop widget';
+  btn.innerHTML = ic('widget');
+  $('#remind-btn').before(btn);
+  btn.addEventListener('click', (e) => { e.stopPropagation(); if (ctxMenu?.classList.contains('widget-menu')) closeTaskMenu(); else openWidgetMenu(); });
+  window.capriDesktop.widgetSettings().then((s) => { widgetState = s; btn.classList.toggle('on', s.on); }).catch(() => {});
+  // Changed from the tray, the widget's own menu, or by dragging it.
+  window.capriDesktop.onWidgetChanged?.((s) => { widgetState = s; btn.classList.toggle('on', s.on); refreshWidgetMenu(); });
 }
 
 function updateNowStrip() {
@@ -4794,7 +4927,8 @@ $('#theme-btn').addEventListener('click', toggleTheme);
 $('#refresh-btn').addEventListener('click', () => sync());
 $('#add-project').addEventListener('click', createProject);
 $('#add-label').addEventListener('click', () => createLabel());
-$('#remind-btn').addEventListener('click', (e) => { e.stopPropagation(); if (ctxMenu?.classList.contains('remind-menu')) closeTaskMenu(); else openRemindMenu(); });
+$('#remind-btn').addEventListener('click', (e) => { e.stopPropagation(); if (ctxMenu?.classList.contains('remind-menu') && !ctxMenu.classList.contains('widget-menu')) closeTaskMenu(); else openRemindMenu(); });
+setupWidgetButton();
 $('#menu-btn').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
 // Phone: tapping anywhere outside the sidebar, or picking something in it, closes it.
 $('#sidebar-scrim').addEventListener('click', () => $('#sidebar').classList.remove('open'));

@@ -111,6 +111,12 @@ function widgetBounds() {
     ...size,
   };
 }
+// Moving it from here (a corner, a new size, a screen change) isn't the user dragging it somewhere.
+let widgetPlacedAt = 0;
+function setWidgetBounds(bounds) {
+  widgetPlacedAt = Date.now();
+  widget.setBounds(bounds);
+}
 function createWidget() {
   if (widget || !config.serverUrl) return;
   const onDesktop = widgetOnDesktop() && !widgetMoving; // while moving it's an ordinary window you can drag
@@ -130,7 +136,9 @@ function createWidget() {
     if (!IS_MAC && !desktopPin.pin(widget)) widget.setAlwaysOnTop(false);
   });
   widget.on('focus', () => { if (!IS_MAC && !widgetMoving) desktopPin.sendToBack(widget); });
-  widget.on('moved', () => { const [x, y] = widget.getPosition(); saveConfig({ widgetPos: { x, y } }); });
+  widget.on('moved', () => {
+    if (Date.now() - widgetPlacedAt < 600) return;
+    const [x, y] = widget.getPosition(); saveConfig({ widgetPos: { x, y } }); widgetChanged(); });
   widget.on('minimize', () => widget.restore());
   // Right-clicking where the card drags gives Windows' own window menu; show the widget's instead.
   widget.on('system-context-menu', (e) => { e.preventDefault(); popupWidgetMenu(); });
@@ -143,45 +151,71 @@ function rebuildWidget() {
   widget = null;
   if (config.widget) createWidget();
 }
+// What Capri's sidebar shows in its widget panel. It's told whenever a setting changes from anywhere.
+function widgetState() {
+  return {
+    on: Boolean(config.widget), kind: widgetKind(), kinds: WIDGET_KINDS,
+    corner: config.widgetPos ? null : config.widgetCorner || 'top-right',
+    size: widgetSize(), defaultSize: WIDGET_SIZES[widgetKind()], customSize: Boolean(config.widgetSizes?.[widgetKind()]),
+    clickable: !widgetOnDesktop(), mac: IS_MAC, moving: widgetMoving,
+  };
+}
+function widgetChanged() {
+  tray?.setContextMenu(buildTrayMenu());
+  if (win && !win.isDestroyed()) win.webContents.send('capri:widget-changed', widgetState());
+}
 function setWidget(on) {
   saveConfig({ widget: on });
   widgetMoving = false;
   rebuildWidget();
+  widgetChanged();
 }
 function setWidgetKind(kind) {
+  if (!WIDGET_SIZES[kind]) return;
   saveConfig({ widgetKind: kind });
   rebuildWidget(); // each kind has its own size
+  widgetChanged();
 }
 function placeWidget(corner) {
+  if (!['top-right', 'top-left', 'bottom-right', 'bottom-left'].includes(corner)) return;
   saveConfig({ widgetCorner: corner, widgetPos: null });
-  if (widget) widget.setBounds(widgetBounds());
+  if (widget) setWidgetBounds(widgetBounds());
+  widgetChanged();
 }
 function moveWidget() {
   widgetMoving = true;
   rebuildWidget();
+  widgetChanged();
 }
 function setWidgetClickable(on) {
   saveConfig({ widgetClickable: on });
   widgetMoving = false;
   rebuildWidget();
+  widgetChanged();
 }
 let sizeSave = null;
-function resizeWidget({ width, height }) {
-  if (!widget || !Number.isFinite(width) || !Number.isFinite(height)) return;
+function resizeWidget({ width, height }, { now = false } = {}) {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return;
   const size = {
     width: Math.round(Math.min(WIDGET_MAX.width, Math.max(WIDGET_MIN.width, width))),
     height: Math.round(Math.min(WIDGET_MAX.height, Math.max(WIDGET_MIN.height, height))),
   };
-  const [x, y] = widget.getPosition();
-  widget.setBounds({ x, y, ...size });
+  const save = () => { saveConfig({ widgetSizes: { ...config.widgetSizes, [widgetKind()]: size } }); widgetChanged(); };
   clearTimeout(sizeSave); // a drag sends many sizes; keep the last
-  sizeSave = setTimeout(() => saveConfig({ widgetSizes: { ...config.widgetSizes, [widgetKind()]: size } }), 400);
+  if (now) { // picked from the sidebar: a widget in a corner stays tucked into it
+    save();
+    if (widget) { const [x, y] = widget.getPosition(); setWidgetBounds(config.widgetPos ? { x, y, ...size } : widgetBounds()); }
+    return;
+  }
+  if (widget) { const [x, y] = widget.getPosition(); setWidgetBounds({ x, y, ...size }); }
+  sizeSave = setTimeout(save, 400);
 }
 function resetWidgetSize() {
   const sizes = { ...config.widgetSizes };
   delete sizes[widgetKind()];
   saveConfig({ widgetSizes: sizes });
-  if (widget) { const [x, y] = widget.getPosition(); widget.setBounds({ x, y, ...widgetSize() }); }
+  if (widget) { const [x, y] = widget.getPosition(); setWidgetBounds(config.widgetPos ? { x, y, ...widgetSize() } : widgetBounds()); }
+  widgetChanged();
 }
 // The widget's settings, in the tray / menu-bar menu and on the widget's right-click menu.
 function widgetMenuItems() {
@@ -212,12 +246,26 @@ function popupWidgetMenu() {
   ]).popup({ window: widget, callback: () => setTimeout(() => tray?.setContextMenu(buildTrayMenu()), 100) }); // ticks match on the Mac menu bar
 }
 ipcMain.on('capri:widget-menu', (e) => { if (e.sender === widget?.webContents) popupWidgetMenu(); });
+ipcMain.handle('capri:widget-get', () => widgetState());
+// The sidebar's widget panel, in the main window.
+ipcMain.handle('capri:widget-set', (e, changes = {}) => {
+  if (e.sender !== win?.webContents) return widgetState();
+  if ('on' in changes) setWidget(Boolean(changes.on));
+  if (changes.kind) setWidgetKind(changes.kind);
+  if (changes.corner) placeWidget(changes.corner);
+  if (changes.size === 'reset') resetWidgetSize();
+  else if (changes.size) resizeWidget(changes.size, { now: true });
+  if ('clickable' in changes && IS_MAC) setWidgetClickable(Boolean(changes.clickable));
+  if (changes.move && widgetOnDesktop() && config.widget) moveWidget();
+  return widgetState();
+});
 ipcMain.on('capri:widget-resize', (e, size) => { if (e.sender === widget?.webContents) resizeWidget(size || {}); });
 ipcMain.on('capri:widget-done', () => {
   if (!widgetMoving) return;
   if (widget) { const [x, y] = widget.getPosition(); saveConfig({ widgetPos: { x, y } }); }
   widgetMoving = false;
   rebuildWidget();
+  widgetChanged();
 });
 ipcMain.on('capri:open', () => showWindow());
 
@@ -506,8 +554,8 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     if (config.widget) createWidget();
     // The widget keeps to its corner when screens are added, removed or resized.
-    screen.on('display-metrics-changed', () => widget?.setBounds(widgetBounds()));
-    screen.on('display-removed', () => widget?.setBounds(widgetBounds()));
+    screen.on('display-metrics-changed', () => widget && setWidgetBounds(widgetBounds()));
+    screen.on('display-removed', () => widget && setWidgetBounds(widgetBounds()));
     globalShortcut.register(QUICK_ADD_SHORTCUT, quickAdd);
     setupUpdates();
     // First launch: start with Windows unless the user turns it off from the tray.
