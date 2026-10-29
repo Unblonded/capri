@@ -712,7 +712,7 @@ try { vapid = JSON.parse(fs.readFileSync(VAPID_FILE, 'utf8')); } catch {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(VAPID_FILE, JSON.stringify(vapid, null, 2));
 }
-webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'https://github.com/Unblonded/tasks', vapid.publicKey, vapid.privateKey);
+webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'https://github.com/Unblonded/capri', vapid.publicKey, vapid.privateKey);
 
 const DEFAULT_REMIND = { lead: 5, blocks: true, tasks: true, deadlines: true };
 const pushFile = (dir) => path.join(dir, 'push.json');

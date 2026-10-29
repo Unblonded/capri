@@ -41,7 +41,7 @@ Every page is sent with browser protections: a content security policy (only Cap
 One-time setup on the server PC:
 
 ```bash
-git clone https://github.com/Unblonded/tasks.git capri
+git clone https://github.com/Unblonded/capri.git
 cd capri
 npm install --omit=dev
 npm run serve
