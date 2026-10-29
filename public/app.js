@@ -4201,6 +4201,81 @@ document.addEventListener('touchmove', (e) => {
 }, { passive: true });
 document.addEventListener('touchend', () => { if (headHold) { clearTimeout(headHold.timer); headHold = null; } });
 
+// Phone: pull the list down from the top and let go to sync with Todoist. A badge follows the finger,
+// its arrows turning as you pull, and spins while the sync runs.
+const PULL_AT = 70;
+let pull = null;
+let pulling = false; // a sync started by pulling is still running
+function pullBadge() {
+  let el = $('#ptr');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ptr';
+    el.className = 'ptr glass';
+    el.innerHTML = ic('sync');
+    $('.main').append(el);
+  }
+  return el;
+}
+document.addEventListener('touchstart', (e) => {
+  if (pull || pulling || e.touches.length > 1 || !matchMedia('(max-width: 760px)').matches) return;
+  const view = $('#view');
+  if (!e.target.closest('#view') || view.scrollTop > 0) return;
+  if ($('.modal:not(.hidden), #detail:not(.hidden), .ctx-menu') || $('#sidebar').classList.contains('open')) return;
+  if (e.target.closest('input, textarea, select, canvas, [contenteditable]')) return;
+  const inner = e.target.closest('.sched-scroll');
+  if (inner && inner.scrollTop > 0) return; // that box scrolls up first
+  const t = e.touches[0];
+  pull = { x: t.clientX, y: t.clientY, d: 0, active: false };
+}, { passive: true });
+document.addEventListener('touchmove', (e) => {
+  if (!pull) return;
+  const t = e.touches[0];
+  const dx = t.clientX - pull.x;
+  const dy = t.clientY - pull.y;
+  if (!pull.active) {
+    if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) { pull = null; return; } // a sideways swipe
+    if (dy < -4) { pull = null; return; } // scrolling down the list
+    if (dy < 10) return;
+    if (hold?.ghost || colDrag?.on || swipe?.active || navSwipe?.active) { pull = null; return; }
+    pull.active = true;
+    pullBadge().classList.add('show');
+    if (headHold) { clearTimeout(headHold.timer); headHold = null; }
+  }
+  e.preventDefault(); // stop iOS dragging the whole page instead
+  pull.d = Math.max(0, dy - 10) * 0.55; // heavier the further it goes
+  const el = pullBadge();
+  const d = Math.min(pull.d, PULL_AT * 1.6);
+  el.style.transform = `translate(-50%, ${d}px)`;
+  el.style.opacity = Math.min(1, d / 40);
+  el.querySelector('.ic').style.transform = `rotate(${(d / PULL_AT) * 270}deg)`;
+  el.classList.toggle('armed', pull.d >= PULL_AT);
+}, { passive: false });
+const endPull = async () => {
+  const p = pull;
+  pull = null;
+  if (!p?.active) return;
+  swipeEndedAt = Date.now(); // the lift-off isn't a tap
+  const el = pullBadge();
+  el.querySelector('.ic').style.transform = '';
+  if (p.d < PULL_AT) {
+    el.classList.remove('armed', 'show');
+    el.style.transform = el.style.opacity = '';
+    return;
+  }
+  pulling = true;
+  navigator.vibrate?.(10);
+  el.classList.add('spinning');
+  el.style.transform = `translate(-50%, ${PULL_AT * 0.75}px)`;
+  try { await sync(); } finally {
+    pulling = false;
+    el.classList.remove('spinning', 'armed', 'show');
+    el.style.transform = el.style.opacity = '';
+  }
+};
+document.addEventListener('touchend', endPull);
+document.addEventListener('touchcancel', endPull);
+
 // Phone: swipe right to pull the sidebar out (from anywhere, tasks included), swipe left to put it away.
 // The sidebar follows the finger and settles open or shut depending on how far, and how fast, it went.
 const NAV_EDGE = 24;

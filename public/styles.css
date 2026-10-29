@@ -1354,3 +1354,16 @@ img, svg { -webkit-user-drag: none; }
 .label-edit .dot { width: 9px; height: 9px; border-radius: 50%; }
 .nav-item.menu-on { outline: 2px solid var(--accent); outline-offset: -2px; }
 .nav-empty { padding: 4px 10px; color: var(--accent); }
+
+/* Pull to sync (phones) */
+.ptr {
+  position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 50%; z-index: 30; width: 40px; height: 40px; border-radius: 50%;
+  display: grid; place-items: center; color: var(--muted); background: var(--glass-strong); box-shadow: var(--shadow);
+  transform: translate(-50%, -60px); opacity: 0; pointer-events: none; transition: transform .3s var(--ease-out, ease), opacity .25s, color .15s;
+}
+.ptr.show { transition: color .15s; }
+.ptr.spinning { transition: transform .25s var(--ease-out, ease), color .15s; }
+.ptr .ic { width: 20px; height: 20px; }
+.ptr.armed, .ptr.spinning { color: var(--accent); }
+.ptr.spinning .ic { animation: ptr-spin .8s linear infinite; }
+@keyframes ptr-spin { to { rotate: 360deg; } }
