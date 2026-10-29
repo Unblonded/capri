@@ -969,7 +969,7 @@ document.addEventListener('keydown', (e) => {
   } else if (!['Enter', ' ', 'Tab'].includes(e.key)) e.stopPropagation(); // don't fire app shortcuts underneath
 }, true);
 addEventListener('resize', closeTaskMenu);
-document.addEventListener('scroll', closeTaskMenu, true);
+document.addEventListener('scroll', (e) => { if (!ctxMenu?.contains(e.target)) closeTaskMenu(); }, true); // scrolling a tall menu itself keeps it open
 
 // ---------- liquid light ----------
 // A soft highlight follows the mouse across glass panels and task rows.
