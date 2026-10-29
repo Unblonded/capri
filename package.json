@@ -1,6 +1,6 @@
 {
   "name": "capri",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Capri — a liquid-glass Todoist client running on Express",
   "main": "desktop/main.cjs",
   "type": "module",
@@ -24,7 +24,8 @@
     "dotenv": "^16.4.5",
     "electron-updater": "^6.3.9",
     "express": "^4.21.2",
-    "koffi": "3.3.2"
+    "koffi": "3.3.2",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "electron": "^33.2.1",

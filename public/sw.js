@@ -96,3 +96,23 @@ function notifyUpdated() {
     for (const c of await self.clients.matchAll({ type: 'window' })) c.postMessage('capri-updated');
   }, 300);
 }
+
+// Reminders pushed by the server (see /api/push in server.js), shown even while Capri is closed.
+self.addEventListener('push', (e) => {
+  let r = {};
+  try { r = e.data ? e.data.json() : {}; } catch { r = { title: 'Capri', body: e.data?.text() }; }
+  e.waitUntil(self.registration.showNotification(r.title || 'Capri', {
+    body: r.body || '', tag: r.tag || undefined, icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', data: { url: r.url || '/' },
+  }));
+});
+
+// Tapping one opens Capri (or brings it forward) on the right page.
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL(e.notification.data?.url || '/', location.origin).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+    const win = wins.find((w) => new URL(w.url).origin === location.origin);
+    if (win) return win.focus().then((w) => w?.navigate?.(url).catch(() => {}));
+    return self.clients.openWindow(url);
+  }));
+});

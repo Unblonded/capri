@@ -1,6 +1,7 @@
-// Only the setup screen needs to talk to the main process.
+// The setup screen sets the server; the app itself shows reminders as native notifications.
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('capriDesktop', {
   setServer: (url) => ipcRenderer.invoke('capri:set-server', url),
+  notify: (n) => ipcRenderer.send('capri:notify', n),
 });

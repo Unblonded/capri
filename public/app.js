@@ -28,6 +28,7 @@ const ICONS = {
   pencil: '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/><path d="M14.5 5.5l3 3"/>',
   marker: '<path d="M9.5 14.5L5 19h4.5l2-2"/><path d="M14 4l6 6-8.5 8.5-6-6z"/>',
   eraser: '<path d="M8 21h12"/><path d="M5.5 14.5l9-9a2 2 0 0 1 2.8 0l2.2 2.2a2 2 0 0 1 0 2.8L11 19H9.5z"/>',
+  bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   timer: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 10v3.5l2.5 2M9.5 2.5h5M19 6l1.5-1.5"/>',
   comment: '<path d="M20.5 12a8.5 8.5 0 0 1-12.4 7.5L3.5 21l1.4-4.4A8.5 8.5 0 1 1 20.5 12z"/>',
@@ -140,6 +141,7 @@ async function sync({ quiet = false, auto = false } = {}) {
     data.tasks = data.tasks.filter((x) => !pendingDeletes.has(x.id) && !pendingDeletes.has(x.parent_id));
     Object.assign(state, data, { drawings, deadlines, prefs, schedule, lastSync: Date.now() });
     loadDoneToday();
+    sendPlan();
     const before = taskRowsOnScreen();
     render();
     // First load and a tap on Sync flow the whole list in; background syncs only move what changed.
@@ -949,7 +951,11 @@ document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   openTaskMenu(row.dataset.task, e.clientX, e.clientY);
 });
-document.addEventListener('pointerdown', (e) => { if (ctxMenu && !ctxMenu.contains(e.target)) closeTaskMenu(); }, true);
+document.addEventListener('pointerdown', (e) => {
+  if (!ctxMenu || ctxMenu.contains(e.target)) return;
+  if (ctxMenu.classList.contains('remind-menu') && e.target.closest('#remind-btn')) return; // the bell toggles its own menu
+  closeTaskMenu();
+}, true);
 document.addEventListener('keydown', (e) => {
   if (!ctxMenu) return;
   const opts = $$('button', ctxMenu);
@@ -1502,6 +1508,190 @@ function renderRing() {
 }
 
 
+
+
+// ---------- reminders ----------
+// Schedule blocks, tasks with a time and deadlines, as notifications. Phones (on the Home Screen) and
+// browsers get them pushed by the server even while Capri is closed. The Windows and Mac app can't
+// receive web pushes, so it reminds you itself, as native notifications, while it runs in the tray or
+// menu bar. Each device is switched on separately; how early and what for is shared.
+const remind = { key: null, devices: 0, endpoints: [], settings: { lead: 5, blocks: true, tasks: true, deadlines: true }, mode: store.get('remindMode', null) };
+const isDesktopApp = () => !!window.capriDesktop;
+const isIOS = () => /iP(hone|ad|od)/.test(navigator.platform) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const onHomeScreen = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const canPush = () => !isDesktopApp() && 'PushManager' in window && 'serviceWorker' in navigator && isSecureContext;
+const setRemindMode = (mode) => { remind.mode = mode; store.set('remindMode', mode); $('#remind-btn')?.classList.toggle('on', !!mode); };
+const zone = () => ({ tz: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: navigator.language });
+
+async function loadReminders() {
+  try { Object.assign(remind, await api('GET', '/api/push')); } catch { return; }
+  // This device's push subscription can lapse (the browser drops it, or it was removed): renew or forget it.
+  if (remind.mode === 'push' && canPush()) {
+    const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription().catch(() => null);
+    if (!sub || Notification.permission !== 'granted') setRemindMode(null);
+    else if (!remind.endpoints.includes(sub.endpoint)) await api('POST', '/api/push/subscribe', { subscription: sub.toJSON(), ...zone() }).then(() => remind.devices++).catch(() => {});
+  }
+  setRemindMode(remind.mode);
+  sendPlan();
+}
+
+const dueAt = (t) => { const dt = t.due?.datetime || (t.due?.date?.length > 10 ? t.due.date : null); return dt ? new Date(dt).getTime() : null; };
+const atNine = (day) => parseDay(day).setHours(9, 0, 0, 0);
+// The next week of task and deadline reminders.
+function planItems() {
+  const { lead, tasks, deadlines } = remind.settings;
+  const now = Date.now();
+  const soon = now + 8 * 864e5;
+  const out = [];
+  for (const t of openTasks()) {
+    const at = dueAt(t);
+    if (tasks && at && at - lead * 60000 > now - 60000 && at < soon) {
+      const time = new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      out.push({ at: at - lead * 60000, title: plain(t.content).slice(0, 120), body: lead ? `Due in ${lead} min · ${time}` : `Due now · ${time}`, tag: `task-${t.id}` });
+    }
+    const dl = deadlineDay(t);
+    if (deadlines && dl) {
+      const before = atNine(ymd(addDays(parseDay(dl), -1)));
+      if (before > now && before < soon) out.push({ at: before, title: 'Deadline tomorrow', body: plain(t.content).slice(0, 200), tag: `dl-${t.id}-1` });
+      const on = atNine(dl);
+      if (on > now && on < soon) out.push({ at: on, title: 'Deadline today', body: plain(t.content).slice(0, 200), tag: `dl-${t.id}-0` });
+    }
+  }
+  return out.sort((a, b) => a.at - b.at).slice(0, 300);
+}
+
+// The server needs the plan only when some device takes pushes; send it again only when it changed.
+let lastPlan = '';
+function sendPlan() {
+  if (!remind.devices) return;
+  const items = planItems();
+  const json = JSON.stringify(items);
+  if (json === lastPlan) return;
+  lastPlan = json;
+  api('POST', '/api/push/plan', { items }).catch(() => { lastPlan = ''; });
+}
+
+const b64ToBytes = (b64) => Uint8Array.from(atob((b64 + '='.repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+
+async function turnRemindersOn() {
+  if (isIOS() && !onHomeScreen() && !isDesktopApp()) return toast('On iPhone, add Capri to your Home Screen first (Share → Add to Home Screen), then turn reminders on there.');
+  // The desktop app hands reminders to Windows or macOS itself; everywhere else the browser has to allow them.
+  if (!window.capriDesktop?.notify) {
+    if (!('Notification' in window)) return toast('This browser can’t show notifications.');
+    const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+    if (perm !== 'granted') return toast('Notifications are blocked for Capri. Allow them in your settings, then try again.');
+  }
+  try {
+    if (canPush()) {
+      if (!remind.key) await loadReminders();
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(remind.key) });
+      await api('POST', '/api/push/subscribe', { subscription: sub.toJSON(), ...zone() });
+      setRemindMode('push');
+      await loadReminders();
+      toast('Reminders on. They’ll arrive even when Capri is closed.');
+    } else {
+      await api('POST', '/api/push/settings', zone()).catch(() => {});
+      setRemindMode('local');
+      toast(isDesktopApp() ? `Reminders on. Capri reminds you while it’s running in the ${navigator.platform.startsWith('Mac') ? 'menu bar' : 'tray'}.` : 'Reminders on while this tab is open.');
+    }
+  } catch (err) { toast(`Couldn’t turn reminders on: ${err.message}`); }
+}
+
+async function turnRemindersOff() {
+  if (remind.mode === 'push' && canPush()) {
+    const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription().catch(() => null);
+    if (sub) { await api('POST', '/api/push/unsubscribe', { endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe().catch(() => {}); }
+  }
+  setRemindMode(null);
+  await loadReminders();
+  toast('Reminders off on this device');
+}
+
+async function changeReminders(change) {
+  Object.assign(remind.settings, change);
+  lastPlan = '';
+  try { Object.assign(remind.settings, (await api('POST', '/api/push/settings', change)).settings); } catch (err) { toast(err.message); }
+  sendPlan();
+}
+
+function showLocal(r) {
+  if (isDesktopApp() && window.capriDesktop.notify) return window.capriDesktop.notify(r);
+  try { new Notification(r.title, { body: r.body, tag: r.tag, icon: '/icons/icon-192.png' }).onclick = () => { window.focus(); location.hash = r.url.slice(1); }; } catch { /* not allowed */ }
+}
+
+function testReminder() {
+  if (remind.mode === 'push') return api('POST', '/api/push/test').then(() => toast('Test sent')).catch((err) => toast(err.message));
+  showLocal({ title: 'Reminders are on', body: 'This is how Capri will remind you.', tag: 'test', url: '/#/schedule' });
+}
+
+// In the desktop app (or a browser without pushes) the reminders come from here, checked every 30 seconds.
+const localSent = new Map(Object.entries(store.get('remindSent', {})));
+setInterval(() => {
+  if (remind.mode !== 'local' || !state.tasks.length) return;
+  const now = Date.now();
+  const due = [];
+  const { lead, blocks } = remind.settings;
+  if (blocks) {
+    const min = nowMin();
+    for (const b of dayBlocks(today())) {
+      const at = toMin(b.start) - lead;
+      if (!b.done && min >= at && min < at + 3) due.push({ key: `b:${today()}:${b.id}:${b.start}:${lead}`, title: b.title, body: lead ? `Starts in ${lead} min · ${blockSpan(b)}` : `Now until ${fmtTime(b.end)}`, tag: `block-${b.id}`, url: '/#/schedule' });
+    }
+  }
+  for (const i of planItems().concat(lastLocalPlan)) if (i.at <= now && i.at > now - 5 * 60000) due.push({ ...i, key: `p:${i.tag}:${i.at}`, url: '/#/today' });
+  lastLocalPlan = planItems().filter((i) => i.at > now - 5 * 60000 && i.at <= now + 60000);
+  let changed = false;
+  for (const r of due) {
+    if (localSent.has(r.key)) continue;
+    localSent.set(r.key, now);
+    changed = true;
+    showLocal(r);
+  }
+  for (const [k, t] of localSent) if (now - t > 864e5) { localSent.delete(k); changed = true; }
+  if (changed) store.set('remindSent', Object.fromEntries(localSent));
+}, 30000);
+let lastLocalPlan = []; // keeps a reminder whose time has just passed from slipping out of the window
+
+function openRemindMenu() {
+  closeDropdown();
+  closeTaskMenu();
+  const on = !!remind.mode;
+  const s = remind.settings;
+  const needsHome = isIOS() && !onHomeScreen() && !isDesktopApp();
+  const where = remind.mode === 'push' ? 'Pushed to this device, even when Capri is closed.'
+    : remind.mode === 'local' ? (isDesktopApp() ? 'From this app while it runs in the background.' : 'While this tab is open.')
+    : needsHome ? 'On iPhone, add Capri to your Home Screen first (Share → Add to Home Screen), then turn them on there.'
+    : 'Off on this device.';
+  const items = [
+    needsHome ? null : (on ? ['bell', 'Turn off on this device', turnRemindersOff] : ['bell', 'Turn on reminders here', turnRemindersOn, 'strong']),
+    on && ['sparkle', 'Send a test', testReminder],
+  ].filter(Boolean);
+  const check = (k, label) => `<button class="dd-opt remind-opt ${s[k] ? 'on' : ''}" data-remind-flag="${k}">${ic('check')}<span class="dd-text">${label}</span></button>`;
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu ctx-menu remind-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = `<div class="ctx-note remind-status ${on ? 'on' : ''}">${ic('bell')}<span><b>Reminders ${on ? 'on' : 'off'}</b><br>${esc(where)}</span></div>
+    ${items.map((it) => menuItem(items, it)).join('')}
+    <div class="ctx-sep"></div>
+    <div class="remind-label">How early</div>
+    <div class="ctx-prio remind-lead">${[0, 5, 10, 15, 30].map((m) => `<button class="ctx-p ${s.lead === m ? 'on' : ''}" data-remind-lead="${m}">${m ? `${m}m` : 'On time'}</button>`).join('')}</div>
+    <div class="remind-label">Remind me about</div>
+    ${check('blocks', 'Schedule blocks')}${check('tasks', 'Tasks with a time')}${check('deadlines', 'Deadlines (9 AM the day before and on the day)')}`;
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const lead = e.target.closest('[data-remind-lead]');
+    const flag = e.target.closest('[data-remind-flag]');
+    const opt = e.target.closest('[data-i]');
+    if (lead) { changeReminders({ lead: Number(lead.dataset.remindLead) }); $$('[data-remind-lead]', menu).forEach((b) => b.classList.toggle('on', b === lead)); return; }
+    if (flag) { const k = flag.dataset.remindFlag; const on = !remind.settings[k]; changeReminders({ [k]: on }); flag.classList.toggle('on', on); return; }
+    if (!opt) return;
+    closeTaskMenu();
+    items[opt.dataset.i][2]();
+  });
+  const r = $('#remind-btn').getBoundingClientRect();
+  showMenu(menu, r.left, r.bottom + 6);
+}
 
 // ---------- labels ----------
 const sortedLabels = () => [...state.labels].sort((a, b) => a.item_order - b.item_order);
@@ -3716,6 +3906,7 @@ async function boot() {
   if (!location.hash) location.replace('#/today');
   applyHash();
   await sync({ quiet: true });
+  loadReminders();
 }
 
 // ---------- events ----------
@@ -4426,6 +4617,7 @@ $('#theme-btn').addEventListener('click', toggleTheme);
 $('#refresh-btn').addEventListener('click', () => sync());
 $('#add-project').addEventListener('click', createProject);
 $('#add-label').addEventListener('click', () => createLabel());
+$('#remind-btn').addEventListener('click', (e) => { e.stopPropagation(); if (ctxMenu?.classList.contains('remind-menu')) closeTaskMenu(); else openRemindMenu(); });
 $('#menu-btn').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
 // Phone: tapping anywhere outside the sidebar, or picking something in it, closes it.
 $('#sidebar-scrim').addEventListener('click', () => $('#sidebar').classList.remove('open'));

@@ -295,6 +295,24 @@ function setupUpdates() {
   setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
 }
 
+// Reminders from the page (schedule blocks, tasks, deadlines) as native Windows / Mac notifications.
+// Clicking one brings Capri forward on the page it's about. Shown ones are held so Windows keeps the click.
+const shownNotes = new Set();
+ipcMain.on('capri:notify', (e, n) => {
+  if (!Notification.isSupported() || !n || typeof n.title !== 'string') return;
+  const note = new Notification({ title: n.title.slice(0, 120), body: String(n.body || '').slice(0, 200), silent: false });
+  shownNotes.add(note);
+  const forget = () => shownNotes.delete(note);
+  note.on('click', () => {
+    forget();
+    showWindow();
+    if (typeof n.url === 'string' && /^\/#\/[\w/-]*$/.test(n.url)) win.webContents.executeJavaScript(`location.hash = ${JSON.stringify(n.url.slice(1))}`).catch(() => {});
+  });
+  note.on('close', forget);
+  setTimeout(forget, 10 * 60 * 1000);
+  note.show();
+});
+
 ipcMain.handle('capri:set-server', async (e, input) => {
   const url = normalizeUrl(input);
   if (!url) return { ok: false, error: 'That doesn’t look like an address. Try something like 192.168.1.50:3300' };

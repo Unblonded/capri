@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import webpush from 'web-push';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -649,9 +650,9 @@ app.post('/api/deadlines', requireToken, (req, res) => {
 // blocks were ticked off that day. Older files were just { date: blocks }; those become one-off blocks.
 
 const scheduleFile = (req) => path.join(userDir(req), 'schedule.json');
-function readSchedule(req) {
+function readSchedule(req, file = scheduleFile(req)) {
   let raw = {};
-  try { raw = JSON.parse(fs.readFileSync(scheduleFile(req), 'utf8')); } catch { /* none yet */ }
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* none yet */ }
   if (Array.isArray(raw.schedules)) return { schedules: raw.schedules, days: raw.days || {} };
   return { schedules: [], days: Object.fromEntries(Object.entries(raw).map(([d, blocks]) => [d, { extra: blocks, done: blocks.filter((b) => b.done).map((b) => b.id) }])) };
 }
@@ -698,6 +699,159 @@ app.post('/api/schedule', requireToken, (req, res) => {
   writeSchedule(req, data);
   res.json({ ok: true });
 });
+
+// ---- reminders (web push) ----
+// Phones (Capri on the Home Screen) and browsers get reminders pushed even while Capri is closed. The
+// server sends schedule reminders itself from schedule.json; reminders for tasks and deadlines come from
+// a short plan each device sends after syncing, since the server never keeps your Todoist token.
+
+const VAPID_FILE = path.join(DATA_DIR, 'vapid.json'); // made on first run; lives in data/, never in git
+let vapid;
+try { vapid = JSON.parse(fs.readFileSync(VAPID_FILE, 'utf8')); } catch {
+  vapid = webpush.generateVAPIDKeys();
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(VAPID_FILE, JSON.stringify(vapid, null, 2));
+}
+webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'https://github.com/Unblonded/tasks', vapid.publicKey, vapid.privateKey);
+
+const DEFAULT_REMIND = { lead: 5, blocks: true, tasks: true, deadlines: true };
+const pushFile = (dir) => path.join(dir, 'push.json');
+function readPush(dir) {
+  try {
+    const p = JSON.parse(fs.readFileSync(pushFile(dir), 'utf8'));
+    return { subs: p.subs || [], settings: { ...DEFAULT_REMIND, ...p.settings }, plan: p.plan || [] };
+  } catch { return { subs: [], settings: { ...DEFAULT_REMIND }, plan: [] }; }
+}
+function writePush(dir, data) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(pushFile(dir), JSON.stringify(data, null, 2));
+}
+const cleanText = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+
+app.get('/api/push', requireToken, (req, res) => {
+  const { subs, settings } = readPush(userDir(req));
+  res.json({ key: vapid.publicKey, devices: subs.length, endpoints: subs.map((x) => x.endpoint), settings });
+});
+
+app.post('/api/push/subscribe', requireToken, (req, res) => {
+  const { subscription: sub, tz, locale } = req.body || {};
+  if (!sub || typeof sub.endpoint !== 'string' || !/^https:\/\//.test(sub.endpoint) || !sub.keys?.p256dh || !sub.keys?.auth) {
+    return res.status(400).json({ error: 'Bad subscription' });
+  }
+  const dir = userDir(req);
+  const data = readPush(dir);
+  data.subs = data.subs.filter((x) => x.endpoint !== sub.endpoint).slice(-9); // ten devices at most
+  data.subs.push({ endpoint: sub.endpoint, keys: { p256dh: cleanText(sub.keys.p256dh, 200), auth: cleanText(sub.keys.auth, 100) } });
+  if (tz) data.settings.tz = cleanText(tz, 60);
+  if (locale) data.settings.locale = cleanText(locale, 20);
+  writePush(dir, data);
+  res.json({ ok: true });
+});
+
+app.post('/api/push/unsubscribe', requireToken, (req, res) => {
+  const dir = userDir(req);
+  const data = readPush(dir);
+  data.subs = data.subs.filter((x) => x.endpoint !== req.body?.endpoint);
+  writePush(dir, data);
+  res.json({ ok: true });
+});
+
+app.post('/api/push/settings', requireToken, (req, res) => {
+  const b = req.body || {};
+  const dir = userDir(req);
+  const data = readPush(dir);
+  if ([0, 5, 10, 15, 30].includes(b.lead)) data.settings.lead = b.lead;
+  for (const k of ['blocks', 'tasks', 'deadlines']) if (typeof b[k] === 'boolean') data.settings[k] = b[k];
+  if (b.tz) data.settings.tz = cleanText(b.tz, 60);
+  if (b.locale) data.settings.locale = cleanText(b.locale, 20);
+  writePush(dir, data);
+  res.json({ settings: data.settings });
+});
+
+// The next few days of task and deadline reminders: [{ at: ms, title, body, tag }].
+app.post('/api/push/plan', requireToken, (req, res) => {
+  const items = req.body?.items;
+  if (!Array.isArray(items) || items.length > 300) return res.status(400).json({ error: 'Expected up to 300 reminders' });
+  const now = Date.now();
+  const plan = items.filter((i) => Number.isFinite(i?.at) && i.at > now - 60000 && i.at < now + 9 * 864e5)
+    .map((i) => ({ at: i.at, title: cleanText(i.title, 120), body: cleanText(i.body, 200), tag: cleanText(i.tag, 80) }));
+  const dir = userDir(req);
+  const data = readPush(dir);
+  data.plan = plan;
+  writePush(dir, data);
+  res.json({ ok: true, count: plan.length });
+});
+
+async function pushTo(dir, data, payload) {
+  const gone = [];
+  await Promise.all(data.subs.map((sub) => webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 900, urgency: 'high' })
+    .catch((err) => { if (err.statusCode === 404 || err.statusCode === 410) gone.push(sub.endpoint); })));
+  if (gone.length) {
+    const fresh = readPush(dir);
+    fresh.subs = fresh.subs.filter((x) => !gone.includes(x.endpoint));
+    writePush(dir, fresh);
+  }
+}
+
+app.post('/api/push/test', requireToken, async (req, res) => {
+  const dir = userDir(req);
+  const data = readPush(dir);
+  if (!data.subs.length) return res.status(400).json({ error: 'No device has reminders on' });
+  await pushTo(dir, data, { title: 'Reminders are on', body: 'Capri will remind you here, even when it’s closed.', tag: 'test', url: '/#/schedule' });
+  res.json({ ok: true });
+});
+
+// The wall clock in someone's time zone: date, weekday and minute of the day.
+function localNow(tz) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: tz || undefined, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', weekday: 'short',
+  }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+  return { day: `${parts.year}-${parts.month}-${parts.day}`, weekday: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(parts.weekday), min: Number(parts.hour) * 60 + Number(parts.minute) };
+}
+const clock = (hhmm, locale) => new Date(`2000-01-01T${hhmm}:00Z`).toLocaleTimeString(locale || 'en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' });
+const toMin = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3));
+
+const sentPush = new Map(); // user folder → keys already sent (kept for a day)
+async function sendDueReminders() {
+  let users = [];
+  try { users = fs.readdirSync(path.join(DATA_DIR, 'users')); } catch { return; }
+  const now = Date.now();
+  for (const id of users) {
+    const dir = path.join(DATA_DIR, 'users', id);
+    if (!fs.existsSync(pushFile(dir))) continue;
+    const data = readPush(dir);
+    if (!data.subs.length) continue;
+    const sent = sentPush.get(id) || new Map();
+    sentPush.set(id, sent);
+    for (const [k, t] of sent) if (now - t > 864e5) sent.delete(k);
+    const out = [];
+    const { lead, locale, tz } = data.settings;
+    if (data.settings.blocks) {
+      const { day, weekday, min } = localNow(tz);
+      const sched = readSchedule(null, path.join(dir, 'schedule.json'));
+      const s = sched.schedules.find((x) => x.days.includes(weekday));
+      const entry = sched.days[day] || { extra: [], done: [] };
+      for (const b of [...(s?.blocks || []), ...(entry.extra || [])]) {
+        if (entry.done?.includes(b.id)) continue;
+        const at = toMin(b.start) - lead;
+        const key = `b:${day}:${b.id}:${b.start}:${lead}`;
+        if (min >= at && min < at + 3 && !sent.has(key)) { // a few minutes' grace if a tick was missed
+          sent.set(key, now);
+          out.push({ title: b.title, body: lead ? `Starts in ${lead} min · ${clock(b.start, locale)} – ${clock(b.end, locale)}` : `Now until ${clock(b.end, locale)}`, tag: `block-${b.id}`, url: '/#/schedule' });
+        }
+      }
+    }
+    for (const i of data.plan) {
+      const key = `p:${i.tag}:${i.at}`;
+      if (i.at <= now && i.at > now - 5 * 60000 && !sent.has(key)) {
+        sent.set(key, now);
+        out.push({ title: i.title, body: i.body, tag: i.tag, url: '/#/today' });
+      }
+    }
+    for (const payload of out) await pushTo(dir, data, payload);
+  }
+}
+setInterval(() => sendDueReminders().catch((err) => console.error('Reminders:', err.message)), 30000);
 
 app.delete('/api/drawings/:id', requireToken, (req, res) => {
   if (!validId(req.params.id)) return res.status(404).end();
