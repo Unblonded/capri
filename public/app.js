@@ -111,18 +111,24 @@ async function api(method, url, body) {
   // Offline, or older changes still waiting to go out (this one has to go after them): it waits too.
   if (write && canQueue(method, url) && (net.offline || outbox().length)) return queueWrite(method, url, body);
   if (write) { writes.pending++; writes.seq++; }
+  // A read that hangs (a bad connection rather than none) gives up in the end, so syncs don't stall behind it.
+  const stop = new AbortController();
+  const giveUp = !write && setTimeout(() => stop.abort(), GET_TIMEOUT);
   let res;
   try {
     res = await fetch(url, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : {},
+      // The service worker hands out its saved copy after the same wait.
+      headers: body ? { 'Content-Type': 'application/json' } : { 'X-Capri-Wait': String(offlineWait()) },
       body: body ? JSON.stringify(body) : undefined,
+      signal: write ? undefined : stop.signal,
     });
   } catch (err) {
     res = null;
-    if (!(err instanceof TypeError)) throw err;
+    if (!(err instanceof TypeError) && err.name !== 'AbortError') throw err;
   } finally {
     if (write) writes.pending--;
+    clearTimeout(giveUp);
   }
   if (!res || unreachable(res)) {
     setOffline(true);
@@ -157,16 +163,48 @@ const canQueue = (method, url) => !/^\/api\/(connect|disconnect|push)\b/.test(ur
 const unreachable = (res) => res.headers.get('X-Capri-Offline') === '1'
   || ([502, 503, 504, 520, 521, 522, 523, 530].includes(res.status) && !/json/.test(res.headers.get('Content-Type') || ''));
 
-const net = { offline: navigator.onLine === false, flushing: false };
+const net = { offline: navigator.onLine === false, flushing: false, openBy: 0 };
+// No answer within this long of Capri opening: it shows the saved copy and counts as offline until the server
+// answers. Set per device from the connection menu (the offline pill, a right-click on Sync, or Search & commands).
+const OFFLINE_WAITS = [[2000, '2 seconds'], [3000, '3 seconds'], [5000, '5 seconds'], [10000, '10 seconds'], [0, 'Never (always wait)']];
+const offlineWait = () => { const v = store.get('offlineWait', 3000); return OFFLINE_WAITS.some(([ms]) => ms === v) ? v : 3000; };
+function setOfflineWait(ms) {
+  store.set('offlineWait', ms);
+  toast(ms ? `Capri counts as offline after ${ms / 1000} seconds with no answer` : 'Capri always waits for the server');
+}
+const PROBE_MS = 3000;
+const GET_TIMEOUT = 20000;
+const SLOW = Symbol('slow');
+const within = (promise, ms) => Promise.race([promise, new Promise((r) => setTimeout(() => r(SLOW), ms))]);
 const outbox = () => store.get('outbox', []);
 const tmpId = () => 'tmp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const isTmp = (id) => typeof id === 'string' && id.startsWith('tmp_');
 
 function setOffline(on) {
+  if (!on) { clearTimeout(probeTimer); probeTimer = 0; }
+  else if (!probeTimer) probeTimer = setTimeout(probe, PROBE_MS);
   if (net.offline === on) return;
   net.offline = on;
   renderNet();
   if (!on) setTimeout(flushOutbox, 0);
+}
+
+// While offline, a light knock on the server every few seconds (straight to it, never the saved copy)
+// finds out the moment it's back; then waiting changes go out and the list refreshes.
+let probeTimer = 0; // one knock at a time
+async function probe() {
+  if (!net.offline) { probeTimer = 0; return; }
+  const stop = new AbortController();
+  const giveUp = setTimeout(() => stop.abort(), 5000);
+  try {
+    const res = await fetch('/api/status', { method: 'HEAD', cache: 'no-store', signal: stop.signal });
+    if (!unreachable(res)) {
+      setOffline(false);
+      if (!WIDGET) sync({ quiet: true });
+      return;
+    }
+  } catch { /* still offline */ } finally { clearTimeout(giveUp); }
+  probeTimer = setTimeout(probe, 4000);
 }
 
 function queueWrite(method, url, body) {
@@ -332,8 +370,31 @@ function renderNet() {
   pill.innerHTML = `${ic(net.flushing ? 'sync' : 'cloudOff')}<span>${net.flushing ? 'Syncing…' : net.offline ? 'Offline' : 'Not synced'}${
     waiting ? ` · ${waiting} change${waiting === 1 ? '' : 's'}` : ''}</span>`;
   pill.title = net.offline
-    ? `No connection to Capri's server. ${waiting ? 'Your changes are saved on this device and sync when you’re back online.' : 'Changes you make are saved here and sync later.'} Tap to try now.`
-    : 'Tap to send your changes now';
+    ? `No connection to Capri's server. ${waiting ? 'Your changes are saved on this device and sync when you’re back online.' : 'Changes you make are saved here and sync later.'}`
+    : 'Your changes are waiting to send';
+}
+
+// Sync now, and how long to wait before counting as offline.
+function openNetMenu(x, y) {
+  closeDropdown();
+  closeTaskMenu();
+  const waiting = outbox().length;
+  const cur = offlineWait();
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu ctx-menu remind-menu net-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = `<div class="remind-label">${net.offline ? 'Offline' : 'Online'}${waiting ? ` · ${waiting} change${waiting === 1 ? '' : 's'} waiting` : ''}</div>
+    <button class="dd-opt" data-net-sync>${ic('sync')}<span class="dd-text">${net.offline ? 'Try now' : 'Sync now'}</span></button>
+    <div class="ctx-sep"></div>
+    <div class="remind-label">Count as offline after</div>
+    ${OFFLINE_WAITS.map(([ms, label]) => `<button class="dd-opt remind-opt ${cur === ms ? 'on' : ''}" data-net-wait="${ms}">${ic('check')}<span class="dd-text">${label}</span></button>`).join('')}`;
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const opt = e.target.closest('[data-net-wait]');
+    if (opt) { closeTaskMenu(); setOfflineWait(Number(opt.dataset.netWait)); }
+    if (e.target.closest('[data-net-sync]')) { closeTaskMenu(); net.offline = false; renderNet(); sync(); }
+  });
+  showMenu(menu, x, y);
 }
 
 let lastSyncFingerprint = '';
@@ -350,8 +411,19 @@ async function sync({ quiet = false, auto = false } = {}) {
   }
   const seq = writes.seq;
   try {
-    const [data, { drawings }, deadlines, prefs, schedule] = await Promise.all([
+    const loading = Promise.all([
       api('GET', '/api/bootstrap'), api('GET', '/api/drawings'), api('GET', '/api/deadlines'), api('GET', '/api/prefs'), api('GET', '/api/schedule')]);
+    const opening = !state.tasks.length && !lastSyncFingerprint && net.openBy;
+    let answer = opening ? await within(loading, Math.max(0, net.openBy - Date.now())) : await loading;
+    // Opening with no answer yet: show the list saved on this device straight away, and keep waiting.
+    if (answer === SLOW) {
+      setOffline(true);
+      if (loadSnapshot()) { lastSyncFingerprint = 'offline'; render(); }
+      answer = await loading;
+    }
+    const [data, { drawings }, deadlines, prefs, schedule] = answer;
+    // Changes made meanwhile go out first; sending them syncs again afterwards.
+    if (outbox().length) return flushOutbox();
     // You changed something while this was loading; the next sync will include it.
     if (auto && (writes.pending || writes.seq !== seq)) return;
     // Nothing changed since last time: don't redraw under the user.
@@ -3900,6 +3972,7 @@ function renderPalette() {
     { label: 'New note', run: () => openNote({}) },
     { label: 'New sketch', run: () => openDraw({}) },
     { label: 'Start focus timer', run: () => startTimer() },
+    ...OFFLINE_WAITS.map(([ms, label]) => ({ label: `Count as offline after: ${label.toLowerCase()}`, run: () => setOfflineWait(ms) })),
     { label: 'Sidebar timer: always show', run: () => setTimerShow('always') },
     { label: 'Sidebar timer: only during a session', run: () => setTimerShow('running') },
     { label: 'Sidebar timer: hide', run: () => setTimerShow('never') },
@@ -4776,7 +4849,17 @@ async function boot() {
   applyTheme(store.get('theme', matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   if (WIDGET) return bootWidget();
   state.sort = store.get('sort', 'smart');
-  const status = await api('GET', '/api/status');
+  const wait = offlineWait();
+  net.openBy = wait && Date.now() + wait;
+  const asking = api('GET', '/api/status');
+  asking.catch(() => {});
+  let status = wait ? await within(asking, wait) : await asking;
+  // No answer in time: go with what this device last heard, and the list saved on it, as offline until the server answers.
+  if (status === SLOW) {
+    const saved = store.get('get:/api/status', null);
+    if (saved?.connected && loadSnapshot()) { setOffline(true); lastSyncFingerprint = 'offline'; }
+    status = saved || await asking;
+  }
   $('#oauth-btn').classList.toggle('hidden', !status.oauthAvailable);
   $('#oauth-or').classList.toggle('hidden', !status.oauthAvailable);
   if (!status.connected) return showConnect();
@@ -5497,7 +5580,8 @@ $('#sidebar-search').addEventListener('click', openPalette);
 $('#help-btn').addEventListener('click', () => $('#help').classList.remove('hidden'));
 $('#theme-btn').addEventListener('click', toggleTheme);
 $('#refresh-btn').addEventListener('click', () => sync());
-$('#net-pill').addEventListener('click', () => { net.offline = false; renderNet(); sync(); });
+$('#net-pill').addEventListener('click', (e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openNetMenu(r.left, r.bottom + 6); });
+$('#refresh-btn').addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); openNetMenu(e.clientX, e.clientY); });
 $('#add-project').addEventListener('click', createProject);
 $('#add-label').addEventListener('click', () => createLabel());
 $('#remind-btn').addEventListener('click', (e) => { e.stopPropagation(); if (ctxMenu?.classList.contains('remind-menu')) closeTaskMenu(); else openRemindMenu(); });

@@ -1,13 +1,13 @@
 // Capri's offline cache. The app itself (page, script, styles, icons, fonts) is served from the cache
 // straight away and refreshed in the background, so the home-screen app opens instantly. Your tasks
 // come from the network when it answers quickly, otherwise from the last copy saved on this device.
-const SHELL = 'capri-shell-v3';
+const SHELL = 'capri-shell-v4';
 const FONTS = 'capri-fonts-v1';
 const DATA = 'capri-data-v1';
 const SHELL_FILES = ['/', '/app.js', '/styles.css', '/manifest.webmanifest', '/icons/apple-touch-icon.png', '/icons/icon-192.png'];
 // Read-only calls whose last answer is worth keeping for offline use.
 const DATA_PATHS = ['/api/status', '/api/bootstrap', '/api/drawings'];
-const NETWORK_WAIT = 3500;
+const NETWORK_WAIT = 3000;
 
 self.addEventListener('install', (e) => {
   // cache: 'reload' skips the browser's own HTTP cache, which Cloudflare tells to keep files for hours.
@@ -70,13 +70,16 @@ async function staleWhileRevalidate(e, key) {
 
 async function networkFirst(req) {
   const cache = await caches.open(DATA);
-  const network = fetch(req).then((res) => {
+  // no-store: an older request for the same address still hanging (a bad connection) mustn't hold this one up.
+  const network = fetch(req, { cache: 'no-store' }).then((res) => {
     if (res.ok) cache.put(req, res.clone());
     // Signed out or token rejected: don't keep serving the old account's tasks.
     else if (res.status === 401) caches.delete(DATA);
     return res;
   });
-  const slow = new Promise((resolve) => setTimeout(resolve, NETWORK_WAIT));
+  // Capri sends how long you've chosen to wait (0: always wait for the server).
+  const wait = Number(req.headers.get('X-Capri-Wait') ?? NETWORK_WAIT);
+  const slow = new Promise((resolve) => { if (wait > 0) setTimeout(resolve, wait); });
   try {
     const first = await Promise.race([network, slow]);
     if (first) return first;
