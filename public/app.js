@@ -35,6 +35,7 @@ const ICONS = {
   subtask: '<path d="M6 3v11a3 3 0 0 0 3 3h10"/><path d="M15.5 13.5L19 17l-3.5 3.5"/>',
   inbox: '<path d="M3 13l2.6-8.2A2.5 2.5 0 0 1 8 3h8a2.5 2.5 0 0 1 2.4 1.8L21 13v5a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z"/><path d="M3 13h5l1.5 3h5l1.5-3h5"/>',
   board: '<rect x="3" y="3.5" width="5" height="17" rx="1.8"/><rect x="9.5" y="3.5" width="5" height="11" rx="1.8"/><rect x="16" y="3.5" width="5" height="14" rx="1.8"/>',
+  more: '<circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/>',
   widget: '<rect x="3" y="4" width="18" height="16" rx="3.5"/><path d="M7 9.5h6M7 13.5h10"/>',
   grid: '<rect x="3" y="3" width="7.5" height="7.5" rx="2.2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2.2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2.2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2.2"/>',
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
@@ -955,7 +956,7 @@ document.addEventListener('contextmenu', (e) => {
 });
 document.addEventListener('pointerdown', (e) => {
   if (!ctxMenu || ctxMenu.contains(e.target)) return;
-  if (ctxMenu.classList.contains('remind-menu') && e.target.closest('#remind-btn')) return; // the bell toggles its own menu
+  if (ctxMenu.classList.contains('remind-menu') && e.target.closest('#remind-btn, #timer-more')) return; // the bell and the timer's ⋯ toggle their own menus
   closeTaskMenu();
 }, true);
 document.addEventListener('keydown', (e) => {
@@ -2966,7 +2967,8 @@ function renderView() {
   } else if (v.type === 'focus') {
     title = 'Focus';
     sub = 'One thing at a time: pick a task, start the timer, finish it';
-    actions = '';
+    actions = `<div class="timer-show"><span>Sidebar timer</span><div class="seg">${[['always', 'Always'], ['running', 'During a session'], ['never', 'Hidden']]
+      .map(([v, label]) => `<button data-act="timer-show" data-v="${v}" class="${timerShow() === v ? 'on' : ''}">${label}</button>`).join('')}</div></div>`;
     const next = upNext();
     html += focusCardHtml();
     html += group('Up next', next.map((x) => taskRow(x, { focusPick: true })).join('')
@@ -3672,6 +3674,9 @@ function renderPalette() {
     { label: 'New note', run: () => openNote({}) },
     { label: 'New sketch', run: () => openDraw({}) },
     { label: 'Start focus timer', run: () => startTimer() },
+    { label: 'Sidebar timer: always show', run: () => setTimerShow('always') },
+    { label: 'Sidebar timer: only during a session', run: () => setTimerShow('running') },
+    { label: 'Sidebar timer: hide', run: () => setTimerShow('never') },
     { label: 'Go to Dashboard', run: () => setView({ type: 'dashboard' }) },
     { label: 'Go to Board', run: () => setView({ type: 'board' }) },
     { label: 'Go to Today', run: () => setView({ type: 'today' }) },
@@ -3730,9 +3735,43 @@ const saveTimer = () => store.set('timer', timer);
 const timerLeft = () => (timer.running ? Math.max(0, Math.round((timer.endAt - Date.now()) / 1000)) : timer.remaining);
 const mmss = (s) => `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
 
+// The sidebar's timer card: always there, only while a session is going (running or paused part-way), or
+// hidden. Picked from the card's own menu, the Focus page, or Search & commands; kept on this device.
+const TIMER_SHOW = [['always', 'Always show'], ['running', 'Only during a session'], ['never', 'Hide']];
+const timerShow = () => (TIMER_SHOW.some(([v]) => v === store.get('timerShow')) ? store.get('timerShow') : 'always');
+function setTimerShow(mode) {
+  const before = timerShow();
+  if (mode === before) return;
+  store.set('timerShow', mode);
+  renderTimer();
+  if (state.view.type === 'focus') render();
+  if (mode === 'never') toast('Timer hidden. Bring it back from Focus.', { label: 'Undo', run: () => setTimerShow(before) });
+}
+function openTimerMenu(x, y) {
+  closeDropdown();
+  closeTaskMenu();
+  const cur = timerShow();
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu ctx-menu remind-menu timer-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = `<div class="remind-label">Sidebar timer</div>
+    ${TIMER_SHOW.map(([v, label]) => `<button class="dd-opt remind-opt ${cur === v ? 'on' : ''}" data-timer-show="${v}">${ic('check')}<span class="dd-text">${label}</span></button>`).join('')}
+    <div class="ctx-sep"></div>
+    <button class="dd-opt" data-timer-focus>${ic('timer')}<span class="dd-text">Open Focus</span></button>`;
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const opt = e.target.closest('[data-timer-show]');
+    if (opt) { closeTaskMenu(); setTimerShow(opt.dataset.timerShow); }
+    if (e.target.closest('[data-timer-focus]')) { closeTaskMenu(); setView({ type: 'focus' }); }
+  });
+  showMenu(menu, x, y);
+}
+
 function renderTimer() {
   const left = timerLeft();
   const task = timer.taskId && taskById(timer.taskId);
+  const show = timerShow();
+  $('#timer').classList.toggle('hidden', show === 'never' || (show === 'running' && !timer.running && left >= TIMER_LEN[timer.mode]));
   $('#timer').classList.toggle('running', timer.running);
   $('#timer').classList.toggle('break', timer.mode === 'break');
   $('#timer-mode').textContent = timer.mode === 'focus' ? (timer.running ? 'Focusing' : 'Focus') : 'Break';
@@ -4594,6 +4633,7 @@ document.addEventListener('click', (e) => {
     if (a === 'tpl-day') return toggleScheduleDay(schedTarget().tpl, Number(act.dataset.d));
     if (a === 'tpl-delete') return deleteSchedule(schedTarget().tpl);
     if (a === 'fc-toggle') return timer.running ? pauseTimer() : startTimer();
+    if (a === 'timer-show') return setTimerShow(act.dataset.v);
     if (a === 'fc-switch') return switchTimer();
     if (a === 'fc-reset') return resetTimer();
     if (a === 'fc-clear') { timer.taskId = null; saveTimer(); renderTimer(); return timerChanged(); }
@@ -5243,6 +5283,13 @@ $('#sidebar').addEventListener('click', (e) => {
 $('#timer-toggle').addEventListener('click', () => (timer.running ? pauseTimer() : startTimer()));
 $('#timer-reset').addEventListener('click', resetTimer);
 $('#timer-switch').addEventListener('click', switchTimer);
+$('#timer-more').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (ctxMenu?.classList.contains('timer-menu')) return closeTaskMenu();
+  const r = e.currentTarget.getBoundingClientRect();
+  openTimerMenu(r.left, r.bottom + 6);
+});
+$('#timer').addEventListener('contextmenu', (e) => { e.preventDefault(); openTimerMenu(e.clientX, e.clientY); });
 $('#timer-task').addEventListener('click', () => timer.taskId && taskById(timer.taskId) && openDetail(timer.taskId));
 $('#disconnect-btn').addEventListener('click', async () => {
   const choice = await askConfirm('Sign out of Capri?', {

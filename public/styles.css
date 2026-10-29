@@ -1651,3 +1651,10 @@ html.widget-mode body:hover .w-grip, .w-grip:active { opacity: .7; }
 @media (prefers-reduced-motion: reduce) {
   .wcard, .w-row, .ws-frame, .ws-frame .wcard, .wstudio .ws-card, .wstudio.closing, .wstudio.closing .ws-card { transition: none; animation: none; }
 }
+
+/* The sidebar timer's options, and the setting on the Focus page */
+.timer-more { margin-left: auto; opacity: .55; transition: opacity .15s; }
+.timer:hover .timer-more, .timer-more:focus-visible { opacity: 1; }
+.timer-more .ic { fill: currentColor; stroke: none; }
+.timer-menu { width: 230px; }
+.timer-show { display: inline-flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
