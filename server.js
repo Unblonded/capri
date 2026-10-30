@@ -247,6 +247,16 @@ app.use(async (req, res, next) => {
 });
 
 
+// The Android app (android/) runs this site full screen in Chrome once Chrome sees the app's signing key
+// listed here. Set ANDROID_CERT_SHA256 to the fingerprint the Android build prints (several: comma-separated).
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  const prints = (process.env.ANDROID_CERT_SHA256 || '').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+  res.json(prints.length ? [{
+    relation: ['delegate_permission/common.handle_all_urls'],
+    target: { namespace: 'android_app', package_name: process.env.ANDROID_PACKAGE || 'com.unblonded.capri', sha256_cert_fingerprints: prints },
+  }] : []);
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // The Windows app updates itself from here: `npm run update` on a Windows server builds it into dist/.

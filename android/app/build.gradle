@@ -1,0 +1,54 @@
+// Capri for Android: a Trusted Web Activity, so the app is Capri's site running full screen in Chrome
+// (the same pages, sign-in and offline cache as the web app), and it updates whenever the server does.
+plugins {
+    id 'com.android.application'
+}
+
+// The version follows package.json, so the APK matches the desktop release it ships with.
+def pkg = new groovy.json.JsonSlurper().parse(file('../../package.json'))
+def (major, minor, patch) = pkg.version.tokenize('.').collect { it.replaceAll(/\D.*/, '') as int }
+// The server the app opens. Build with CAPRI_URL set to use another one.
+def capriUrl = (System.getenv('CAPRI_URL') ?: 'https://capri.kalculator.lol').replaceAll('/+$', '')
+
+android {
+    namespace 'com.unblonded.capri'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.unblonded.capri'
+        minSdk 21
+        targetSdk 35
+        versionCode major * 10000 + minor * 100 + patch
+        versionName pkg.version
+        resValue 'string', 'launchUrl', capriUrl + '/'
+        resValue 'string', 'hostName', new URI(capriUrl).host
+        // Lets Chrome check the site's /.well-known/assetlinks.json and drop the address bar.
+        resValue 'string', 'asset_statements', """[{ \\"relation\\": [\\"delegate_permission/common.handle_all_urls\\"], \\"target\\": { \\"namespace\\": \\"web\\", \\"site\\": \\"${capriUrl}\\" } }]"""
+    }
+
+    // The signing key comes from the environment (see .github/workflows/android.yml), never the repo.
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('CAPRI_KEYSTORE') ?: 'release.jks')
+            storePassword System.getenv('CAPRI_KEYSTORE_PASSWORD')
+            keyAlias System.getenv('CAPRI_KEY_ALIAS') ?: 'capri'
+            keyPassword System.getenv('CAPRI_KEY_PASSWORD') ?: System.getenv('CAPRI_KEYSTORE_PASSWORD')
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}

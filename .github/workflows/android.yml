@@ -1,0 +1,88 @@
+# Builds the Android app (android/) and attaches the APK to a GitHub release:
+# automatically when a release is published, or by hand (Actions → Android → Run workflow) for an existing one.
+#
+# Signing: add these repository secrets so every build is signed with the same key (Android only installs
+# an update over an app signed with the same key):
+#   ANDROID_KEYSTORE_BASE64    the keystore file, base64-encoded
+#   ANDROID_KEYSTORE_PASSWORD  its password
+#   ANDROID_KEY_ALIAS          the key's alias (optional, default "capri")
+# Without them the build still works but uses a throwaway key, so each such APK needs the old one uninstalled first.
+name: Android
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release to attach the APK to (blank = the latest release)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          KS="$RUNNER_TEMP/capri.jks"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
+            echo "CAPRI_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "CAPRI_KEY_ALIAS=${KEY_ALIAS:-capri}" >> "$GITHUB_ENV"
+            echo "KEY_KIND=stable" >> "$GITHUB_ENV"
+          else
+            PASS="$(openssl rand -hex 16)"
+            echo "::add-mask::$PASS"
+            keytool -genkeypair -keystore "$KS" -storepass "$PASS" -keypass "$PASS" -alias capri \
+              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Capri"
+            echo "CAPRI_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+            echo "CAPRI_KEY_ALIAS=capri" >> "$GITHUB_ENV"
+            echo "KEY_KIND=throwaway" >> "$GITHUB_ENV"
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret, so this APK is signed with a throwaway key. Add the signing secrets so updates install over each other."
+          fi
+          echo "CAPRI_KEYSTORE=$KS" >> "$GITHUB_ENV"
+
+      - name: Build
+        working-directory: android
+        run: gradle assembleRelease --no-daemon
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          [ -n "$TAG" ] || TAG="$(gh release view --json tagName --jq .tagName)"
+          VERSION="$(node -p "require('./package.json').version")"
+          APK="Capri-$VERSION-android.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$APK"
+          gh release upload "$TAG" "$APK" --clobber
+          PRINT="$(keytool -list -v -keystore "$CAPRI_KEYSTORE" -storepass "$CAPRI_KEYSTORE_PASSWORD" -alias "$CAPRI_KEY_ALIAS" | awk '/SHA256:/ { print $2 }')"
+          {
+            echo "### $APK attached to $TAG"
+            echo
+            echo "Signed with a **$KEY_KIND** key. SHA-256 fingerprint:"
+            echo
+            echo '```'
+            echo "$PRINT"
+            echo '```'
+            echo
+            echo "Set \`ANDROID_CERT_SHA256=$PRINT\` in the server's .env so the app opens without an address bar."
+          } >> "$GITHUB_STEP_SUMMARY"

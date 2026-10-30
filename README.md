@@ -93,6 +93,15 @@ Capri keeps a copy of itself and your last tasks on the device (`public/sw.js`),
 
 (A Shortcuts *Open URLs* action always opens a Safari tab with the browser bars, so use the home-screen icon for full screen.)
 
+### Android APK
+
+Each GitHub release also carries `Capri-<version>-android.apk`. Download it on the phone, allow installs from your browser when Android asks, and open it. The app is Capri's site running full screen in Chrome (a Trusted Web Activity, `android/`), so it has the same sign-in, offline copy and reminders as the web app and picks up new versions straight from the server. Only Android changes need a new APK.
+
+It's built by GitHub Actions (`.github/workflows/android.yml`) whenever a release is published, or by hand from *Actions → Android → Run workflow*. Two one-time steps:
+
+1. **A signing key**, so new APKs install over old ones. On any computer with Java: `keytool -genkeypair -keystore capri.jks -alias capri -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Capri"`, then add repository secrets `ANDROID_KEYSTORE_BASE64` (`base64 -w0 capri.jks`, or `base64 -i capri.jks` on a Mac) and `ANDROID_KEYSTORE_PASSWORD`. Keep `capri.jks` safe: a lost key means uninstalling and reinstalling. Without the secrets, builds use a throwaway key.
+2. **No address bar:** each build's summary prints its key's SHA-256 fingerprint. Put it in the server's `.env` as `ANDROID_CERT_SHA256=…` and restart; Chrome checks `/.well-known/assetlinks.json` and then hides the bar (it can take a minute, or reinstalling the app).
+
 ## Mac app
 
 `npm run dist:mac` builds native apps for Apple Silicon and Intel: `dist/Capri-<version>-mac-arm64.dmg` and `…-mac-x64.dmg`. Same features as the Windows app: menu-bar icon, ⌘⇧Space quick add, *Open at login*, always on top, clear cache.
